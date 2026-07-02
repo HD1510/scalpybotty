@@ -10,15 +10,18 @@ use App\Trading\Contracts\Strategy;
 use App\Trading\Data\Candle;
 use App\Trading\Data\OrderRequest;
 use App\Trading\Data\OrderResult;
+use App\Trading\Data\Ticker;
 use App\Trading\Enums\OrderSide;
 use App\Trading\Enums\SignalAction;
 use App\Trading\Enums\TradeStatus;
 use App\Trading\Enums\TradingMode;
 use App\Trading\Exceptions\ExchangeException;
 use App\Trading\Risk\RiskManager;
+use App\Trading\Support\Num;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * The live/paper trading engine. Each tick() evaluates every configured
@@ -28,6 +31,16 @@ use Illuminate\Support\Facades\DB;
  */
 final class TradingBot
 {
+    /**
+     * Per-tick ticker memo, keyed by symbol; reset at the start of tick().
+     *
+     * @var array<string, Ticker>
+     */
+    private array $tickerCache = [];
+
+    /** Per-tick quote-asset balance memo; reset at the start of tick(). */
+    private ?float $balanceCache = null;
+
     public function __construct(
         private Exchange $exchange,
         private Strategy $strategy,
@@ -42,6 +55,9 @@ final class TradingBot
      */
     public function tick(): array
     {
+        $this->tickerCache = [];
+        $this->balanceCache = null;
+
         $mode = TradingMode::from(config('trading.mode'));
         $lines = [];
 
@@ -52,8 +68,8 @@ final class TradingBot
                 $lines[] = $trade !== null
                     ? $this->manageOpenTrade($trade)
                     : $this->tryEnter($symbol, $mode);
-            } catch (ExchangeException $e) {
-                $lines[] = "{$symbol}: exchange error — {$e->getMessage()}";
+            } catch (Throwable $e) {
+                $lines[] = sprintf('%s: %s — %s', $symbol, $e::class, $e->getMessage());
             }
         }
 
@@ -72,7 +88,7 @@ final class TradingBot
      */
     private function manageOpenTrade(Trade $trade): string
     {
-        $price = $this->exchange->ticker($trade->symbol)->price;
+        $price = $this->cachedTicker($trade->symbol)->price;
 
         if ($price <= $trade->stop_loss) {
             return $this->closeTrade($trade, 'stop_loss');
@@ -134,7 +150,7 @@ final class TradingBot
             return "{$symbol}: entry blocked — {$blockReason}";
         }
 
-        $quoteBalance = $this->exchange->balance((string) config('trading.quote_asset'));
+        $quoteBalance = $this->cachedBalance();
         $lastClose = $candles[array_key_last($candles)]->close;
         $meta = $this->exchange->symbolMeta($symbol);
 
@@ -151,7 +167,12 @@ final class TradingBot
             );
         }
 
-        $result = $this->exchange->placeOrder(new OrderRequest($symbol, OrderSide::Buy, $qty));
+        $result = $this->exchange->placeOrder(new OrderRequest(
+            $symbol,
+            OrderSide::Buy,
+            $qty,
+            'sb-e-'.$symbol.'-'.now()->getTimestampMs(),
+        ));
 
         if (! $result->isFilled()) {
             return "{$symbol}: entry order {$result->status} — no trade opened";
@@ -175,7 +196,7 @@ final class TradingBot
             $this->persistOrder($result, $mode, $trade->id);
 
             return $trade;
-        });
+        }, 3);
 
         return sprintf(
             '%s: opened trade #%d — qty %s @ %s, SL %s, TP %s (%s)',
@@ -199,82 +220,138 @@ final class TradingBot
             return "{$trade->symbol}: cannot close trade #{$trade->id} — quantity quantizes to zero";
         }
 
-        $result = $this->exchange->placeOrder(new OrderRequest($trade->symbol, OrderSide::Sell, $qty));
+        $result = $this->exchange->placeOrder(new OrderRequest(
+            $trade->symbol,
+            OrderSide::Sell,
+            $qty,
+            'sb-x-'.$trade->id.'-'.now()->getTimestampMs(),
+        ));
 
-        DB::transaction(function () use ($trade, $result, $reason): void {
-            $this->persistOrder($result, $trade->mode, $trade->id);
+        if (! $result->isFilled()) {
+            return "exit order rejected for {$trade->symbol}, keeping trade open (will retry next tick)";
+        }
 
-            $notional = $trade->entry_price * $trade->quantity;
-            $pnl = ($result->averagePrice - $trade->entry_price) * $trade->quantity
-                - $trade->entry_fee
-                - $result->fee;
+        $executedQty = $result->executedQuantity;
+        $notional = $trade->entry_price * $executedQty;
+        $pnl = ($result->averagePrice - $trade->entry_price) * $executedQty
+            - $trade->entry_fee
+            - $result->fee;
+        $pnlPct = $notional > 0 ? $pnl / $notional : null;
 
-            $trade->update([
-                'exit_price' => $result->averagePrice,
-                'exit_fee' => $result->fee,
-                'pnl' => $pnl,
-                'pnl_pct' => $notional > 0 ? $pnl / $notional : 0.0,
-                'status' => TradeStatus::Closed,
-                'closed_at' => now(),
-                'close_reason' => $reason,
-            ]);
-        });
+        try {
+            DB::transaction(function () use ($trade, $result, $reason, $pnl, $pnlPct): void {
+                $this->persistOrder($result, $trade->mode, $trade->id);
 
-        return sprintf(
-            '%s: closed trade #%d (%s) — exit %s, PnL %s (%.2f%%)',
+                $trade->update([
+                    'exit_price' => $result->averagePrice,
+                    'exit_fee' => $result->fee,
+                    'pnl' => $pnl,
+                    'pnl_pct' => $pnlPct,
+                    'status' => TradeStatus::Closed,
+                    'closed_at' => now(),
+                    'close_reason' => $reason,
+                ]);
+            }, 3);
+        } catch (Throwable $e) {
+            return sprintf(
+                '%s: CRITICAL — trade #%d position SOLD on exchange (order %s) but the DB update '
+                .'failed (%s: %s); trade row still marked open, manual reconciliation required',
+                $trade->symbol,
+                $trade->id,
+                $result->orderId,
+                $e::class,
+                $e->getMessage(),
+            );
+        }
+
+        $line = sprintf(
+            '%s: closed trade #%d (%s) — exit %s, PnL %s (%s)',
             $trade->symbol,
             $trade->id,
             $reason,
-            $this->num($trade->exit_price),
-            $this->num($trade->pnl),
-            $trade->pnl_pct * 100,
+            $this->num($result->averagePrice),
+            $this->num($pnl),
+            $pnlPct === null ? 'n/a' : sprintf('%.2f%%', $pnlPct * 100),
         );
+
+        if ($executedQty < $qty) {
+            $line .= sprintf(
+                '; partial fill — %s %s unsold dust remains',
+                $this->num($qty - $executedQty),
+                $meta->baseAsset,
+            );
+        }
+
+        return $line;
     }
 
     /** Free quote balance plus the market value of all open positions in this mode. */
     private function computeEquity(TradingMode $mode): float
     {
-        $equity = $this->exchange->balance((string) config('trading.quote_asset'));
+        $breakdown = $this->equityBreakdown($mode);
 
-        foreach ($this->openTrades($mode) as $trade) {
-            $equity += $trade->quantity * $this->exchange->ticker($trade->symbol)->price;
-        }
-
-        return $equity;
+        return $breakdown['quoteBalance'] + $breakdown['positionValue'];
     }
 
     private function snapshotEquity(TradingMode $mode): string
     {
-        $quoteBalance = $this->exchange->balance((string) config('trading.quote_asset'));
-        $openTrades = $this->openTrades($mode);
-
-        $positionValue = 0.0;
-        $unrealizedPnl = 0.0;
-
-        foreach ($openTrades as $trade) {
-            $price = $this->exchange->ticker($trade->symbol)->price;
-            $positionValue += $trade->quantity * $price;
-            $unrealizedPnl += $trade->unrealizedPnl($price);
-        }
-
-        $equity = $quoteBalance + $positionValue;
+        $breakdown = $this->equityBreakdown($mode);
+        $equity = $breakdown['quoteBalance'] + $breakdown['positionValue'];
 
         EquitySnapshot::query()->create([
             'mode' => $mode,
             'equity' => $equity,
-            'quote_balance' => $quoteBalance,
-            'unrealized_pnl' => $unrealizedPnl,
-            'open_trades' => $openTrades->count(),
+            'quote_balance' => $breakdown['quoteBalance'],
+            'unrealized_pnl' => $breakdown['unrealizedPnl'],
+            'open_trades' => $breakdown['openCount'],
         ]);
 
         return sprintf(
             'equity %s %s — balance %s, unrealized %s, %d open trade(s)',
             $this->num($equity),
             config('trading.quote_asset'),
-            $this->num($quoteBalance),
-            $this->num($unrealizedPnl),
-            $openTrades->count(),
+            $this->num($breakdown['quoteBalance']),
+            $this->num($breakdown['unrealizedPnl']),
+            $breakdown['openCount'],
         );
+    }
+
+    /**
+     * Shared equity math for computeEquity() and snapshotEquity().
+     *
+     * @return array{quoteBalance: float, positionValue: float, unrealizedPnl: float, openCount: int}
+     */
+    private function equityBreakdown(TradingMode $mode): array
+    {
+        $openTrades = $this->openTrades($mode);
+
+        $positionValue = 0.0;
+        $unrealizedPnl = 0.0;
+
+        foreach ($openTrades as $trade) {
+            $price = $this->cachedTicker($trade->symbol)->price;
+            $positionValue += $trade->quantity * $price;
+            $unrealizedPnl += $trade->unrealizedPnl($price);
+        }
+
+        return [
+            'quoteBalance' => $this->cachedBalance(),
+            'positionValue' => $positionValue,
+            'unrealizedPnl' => $unrealizedPnl,
+            'openCount' => $openTrades->count(),
+        ];
+    }
+
+    /** Ticker memoized for the current tick. */
+    private function cachedTicker(string $symbol): Ticker
+    {
+        return $this->tickerCache[$symbol] ??= $this->exchange->ticker($symbol);
+    }
+
+    /** Quote-asset balance memoized for the current tick. */
+    private function cachedBalance(): float
+    {
+        return $this->balanceCache ??= $this->exchange->balance((string) config('trading.quote_asset'));
     }
 
     private function persistOrder(OrderResult $result, TradingMode $mode, ?int $tradeId): void
@@ -319,15 +396,13 @@ final class TradingBot
         return $this->exchange->candles(
             $symbol,
             (string) config('trading.interval'),
-            (int) config('trading.candle_limit'),
+            max((int) config('trading.candle_limit'), $this->strategy->warmupPeriod()),
         );
     }
 
     /** Compact number for log lines: up to 8 decimals, trailing zeros trimmed. */
     private function num(float $value): string
     {
-        $formatted = rtrim(rtrim(number_format($value, 8, '.', ''), '0'), '.');
-
-        return $formatted === '' || $formatted === '-' ? '0' : $formatted;
+        return Num::trim($value);
     }
 }

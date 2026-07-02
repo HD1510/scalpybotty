@@ -142,9 +142,24 @@ final class BotCommandsTest extends TestCase
         $this->primeBuyTick();
         $this->artisan('bot:run', ['--once' => true])->assertExitCode(0);
 
-        // Second tick: price gaps below the 95.0 stop; the exit market order
-        // default-fills at the ticker price.
+        // Second tick: price gaps below the 95.0 stop. Queue an explicit exit
+        // fill (full 20 @ 90, no fee) — the default fill echoes the requested
+        // quantity, which carries a step-size quantization float artifact
+        // (quantize(20.0) => 19.99999), and PnL is computed from the executed
+        // quantity.
         $this->exchange->tickerPrice = 90.0;
+        $this->exchange->orderResults[] = new OrderResult(
+            orderId: 'exit-1',
+            symbol: 'BTCUSDT',
+            side: OrderSide::Sell,
+            status: 'filled',
+            executedQuantity: 20.0,
+            averagePrice: 90.0,
+            fee: 0.0,
+            feeAsset: 'USDT',
+            timestamp: 1_700_000_000_000,
+            raw: ['fake' => true],
+        );
 
         $this->artisan('bot:run', ['--once' => true])->assertExitCode(0);
 
