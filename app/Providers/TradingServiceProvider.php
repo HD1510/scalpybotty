@@ -6,6 +6,7 @@ use App\Trading\Contracts\Exchange;
 use App\Trading\Contracts\Strategy;
 use App\Trading\Enums\TradingMode;
 use App\Trading\Exchanges\BinanceExchange;
+use App\Trading\Exchanges\LiveGuardExchange;
 use App\Trading\Exchanges\PaperExchange;
 use App\Trading\Strategies\StrategyFactory;
 use Illuminate\Support\ServiceProvider;
@@ -22,7 +23,8 @@ class TradingServiceProvider extends ServiceProvider
             $mode = TradingMode::from(config('trading.mode'));
 
             if ($mode === TradingMode::Live) {
-                return $app->make(BinanceExchange::class);
+                // Real orders additionally require trading.live_confirmed.
+                return new LiveGuardExchange($app->make(BinanceExchange::class));
             }
 
             // Paper mode: real market data from Binance, simulated fills.

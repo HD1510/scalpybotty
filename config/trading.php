@@ -15,6 +15,10 @@ return [
 
     'mode' => env('TRADING_MODE', 'paper'),
 
+    // Second factor for live trading: even in live mode, orders are refused
+    // unless this is true (set it, or pass --live-confirmed to bot:run).
+    'live_confirmed' => (bool) env('TRADING_LIVE_CONFIRMED', false),
+
     /*
     |--------------------------------------------------------------------------
     | Market selection
@@ -84,6 +88,7 @@ return [
 
     'strategies' => [
         'ema_rsi_scalp' => [
+            'class' => App\Trading\Strategies\EmaRsiScalpStrategy::class,
             'fast_ema' => 9,
             'slow_ema' => 21,
             'rsi_period' => 14,
@@ -99,6 +104,7 @@ return [
         ],
 
         'bollinger_reversion' => [
+            'class' => App\Trading\Strategies\MeanReversionBollingerStrategy::class,
             'bb_period' => 20,
             'bb_std_dev' => 2.0,
             'rsi_period' => 14,

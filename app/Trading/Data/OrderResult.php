@@ -31,10 +31,4 @@ final readonly class OrderResult
     {
         return $this->status === 'filled' && $this->executedQuantity > 0;
     }
-
-    /** Order value in quote asset. */
-    public function quoteValue(): float
-    {
-        return $this->executedQuantity * $this->averagePrice;
-    }
 }

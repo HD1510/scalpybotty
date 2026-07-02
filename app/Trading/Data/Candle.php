@@ -18,11 +18,6 @@ final readonly class Candle
     ) {
     }
 
-    public function isBullish(): bool
-    {
-        return $this->close > $this->open;
-    }
-
     /** Typical price (HLC/3), used e.g. for VWAP. */
     public function typicalPrice(): float
     {

@@ -18,11 +18,16 @@ final class BotRun extends Command
 
     public function handle(): int
     {
-        if (config('trading.mode') === 'live' && ! $this->option('live-confirmed')) {
-            $this->error('DANGER: trading.mode is "live" — this would place REAL orders with REAL money.');
-            $this->error('Re-run with --live-confirmed if you are certain, or set TRADING_MODE=paper.');
+        if (config('trading.mode') === 'live') {
+            if (! $this->option('live-confirmed') && config('trading.live_confirmed') !== true) {
+                $this->error('DANGER: trading.mode is "live" — this would place REAL orders with REAL money.');
+                $this->error('Re-run with --live-confirmed if you are certain, or set TRADING_MODE=paper.');
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
+
+            // Arm the LiveGuardExchange for this process.
+            config(['trading.live_confirmed' => true]);
         }
 
         // Exchange and Strategy resolve via TradingServiceProvider; RiskManager
