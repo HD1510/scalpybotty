@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Auf dem LOKALEN Rechner (Mac) ausführen:
-#   ./backtest-remote.sh                     # BTCUSDT, 90 Tage, 5m/15m/1h
-#   ./backtest-remote.sh ETHUSDT 60 "5m 1h"  # gleiche Argumente wie backtest.sh
+#   ./backtest-remote.sh                              # BTC/ETH/SOL, 90 Tage, 5m/15m/1h
+#   ./backtest-remote.sh "BTCUSDT ETHUSDT" 60 "1h"    # gleiche Argumente wie backtest.sh
 #
 # Startet ./backtest.sh per SSH auf dem Server und synchronisiert danach
 # alle Reports nach LOCAL_DIR. Umgebungsvariablen wie FORCE_EXPORT=1 oder
@@ -19,7 +19,7 @@ mkdir -p "$LOCAL_DIR"
 echo "==> Backtest auf $SERVER starten..."
 ssh -t "$SERVER" "cd $REMOTE_DIR && \
     FORCE_EXPORT=${FORCE_EXPORT:-0} SPLIT_DAYS=${SPLIT_DAYS:-30} \
-    ./backtest.sh ${1:-BTCUSDT} ${2:-90} \"${3:-5m 15m 1h}\""
+    ./backtest.sh \"${1:-BTCUSDT ETHUSDT SOLUSDT}\" ${2:-90} \"${3:-5m 15m 1h}\""
 
 echo
 echo "==> Reports nach $LOCAL_DIR synchronisieren..."
