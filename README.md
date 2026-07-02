@@ -1,58 +1,106 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# scalpybotty
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Ein Crypto-Scalping-Bot auf Laravel-Basis. Handelt Spot-Märkte auf Binance
+(Mainnet oder Testnet) mit einer EMA-Crossover-Strategie, RSI-Momentum-Filter
+und ATR-basierten Stops — standardmäßig im **Paper-Modus**: echte Marktdaten,
+simulierte Orders, kein echtes Geld.
 
-## About Laravel
+> **Risiko-Warnung:** Kein Trading-Bot ist garantiert profitabel — auch dieser
+> nicht. Scalping ist wegen Gebühren und Slippage besonders unversöhnlich.
+> Lass den Bot ausgiebig im Paper-Modus und Backtest laufen, bevor du auch nur
+> daran denkst, `TRADING_MODE=live` zu setzen. Handle nie mit Geld, dessen
+> Verlust du dir nicht leisten kannst.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Setup
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+composer install
+cp .env.example .env
+php artisan key:generate
+touch database/database.sqlite
+php artisan migrate
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Für den Paper-Modus ist **kein API-Key nötig** — Marktdaten kommen über die
+öffentliche Binance-API. Für Live-Trading (oder das Binance-Testnet) trägst du
+`BINANCE_API_KEY` / `BINANCE_API_SECRET` in `.env` ein.
 
-## Contributing
+## Benutzung
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+# Strategie gegen echte historische Daten testen (empfohlener erster Schritt)
+php artisan bot:backtest --symbol=BTCUSDT --days=14
 
-## Code of Conduct
+# Bot im Paper-Modus laufen lassen (Standard: alle 30s ein Tick)
+php artisan bot:run
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+# Ein einzelner Evaluierungs-Zyklus
+php artisan bot:run --once
 
-## Security Vulnerabilities
+# Offene Positionen, PnL und Equity anzeigen
+php artisan bot:status
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Konfiguration
 
-## License
+Alles Wichtige liegt in `config/trading.php` bzw. `.env`:
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+| Variable | Default | Bedeutung |
+|---|---|---|
+| `TRADING_MODE` | `paper` | `paper` = simulierte Orders, `live` = echtes Geld |
+| `TRADING_SYMBOLS` | `BTCUSDT` | Kommagetrennte Handelspaare |
+| `TRADING_INTERVAL` | `1m` | Candle-Intervall der Strategie |
+| `TRADING_STRATEGY` | `ema_rsi_scalp` | Strategie-Key aus `config/trading.php` |
+| `TRADING_RISK_PER_TRADE` | `0.01` | Anteil der Equity, der pro Trade riskiert wird |
+| `TRADING_MAX_OPEN_TRADES` | `3` | Max. gleichzeitig offene Positionen |
+| `TRADING_MAX_DAILY_LOSS_PCT` | `0.03` | Tages-Verlustlimit — danach öffnet der Bot keine neuen Trades mehr (Circuit Breaker) |
+| `TRADING_PAPER_BALANCE` | `10000` | Startguthaben (Quote-Asset) im Paper-Modus |
+| `BINANCE_TESTNET` | `true` | Binance Spot-Testnet statt Mainnet verwenden |
+
+Die Strategie-Parameter (EMA-Perioden, RSI-Band, ATR-Multiplikatoren) stehen
+unter `strategies.ema_rsi_scalp` in `config/trading.php`.
+
+## Architektur
+
+```
+app/Trading/
+├── Contracts/      Exchange, Strategy, HistoricalDataProvider
+├── Data/           DTOs: Candle, Ticker, Signal, OrderRequest/Result, SymbolMeta
+├── Enums/          OrderSide, SignalAction, TradeStatus, TradingMode
+├── Exchanges/      BinanceExchange (REST, signiert), PaperExchange (Simulation)
+├── Indicators/     EMA, SMA, RSI (Wilder), ATR, Bollinger, VWAP
+├── Strategies/     EmaRsiScalpStrategy
+├── Risk/           RiskManager: Position-Sizing, Trade-Limits, Circuit Breaker
+├── Bot/            TradingBot: der Tick-Loop (Entry/Exit/SL/TP)
+└── Backtest/       Backtester + BacktestResult
+```
+
+Zentrale Design-Entscheidungen:
+
+- **Stop-Loss/Take-Profit verwaltet der Bot selbst** (kein Exchange-OCO),
+  damit sich Paper- und Live-Modus identisch verhalten.
+- **Strategien sind stateless** und sehen ausschließlich abgeschlossene
+  Candles — dieselbe Klasse läuft unverändert im Backtest und live.
+- **Der Backtester ist look-ahead-frei:** Signale werden auf Candle *i*
+  berechnet, ausgeführt wird zur Eröffnung von Candle *i+1*, inklusive
+  Slippage und Gebühren; bei SL und TP in derselben Candle gewinnt
+  pessimistisch der Stop.
+- **Risk-Management sitzt vor jedem Entry:** Fixed-Fractional-Sizing,
+  Max-Positions-Limit und ein tägliches Verlustlimit als Circuit Breaker.
+
+Trades, Orders und Equity-Verlauf werden in SQLite persistiert
+(`trades`, `orders`, `equity_snapshots`, `paper_balances`).
+
+## Tests
+
+```bash
+php artisan test
+```
+
+## Eigene Strategie schreiben
+
+1. Klasse unter `app/Trading/Strategies/` anlegen, die
+   `App\Trading\Contracts\Strategy` implementiert.
+2. Parameter-Block unter `strategies.<name>` in `config/trading.php` ergänzen.
+3. Die Klasse im `match` in `App\Providers\TradingServiceProvider` registrieren.
+4. `TRADING_STRATEGY=<name>` setzen — Backtest zuerst!
