@@ -29,7 +29,9 @@ final readonly class SymbolMeta
 
         $precision = max(0, (int) round(-log10($this->stepSize)));
 
-        return round(floor($quantity / $this->stepSize) * $this->stepSize, $precision);
+        // The epsilon counters float division artifacts: without it,
+        // 20.0 / 0.00001 = 1999999.9999999998 floors to 19.99999.
+        return round(floor($quantity / $this->stepSize + 1e-9) * $this->stepSize, $precision);
     }
 
     /** Round a price to the symbol's tick size. */
