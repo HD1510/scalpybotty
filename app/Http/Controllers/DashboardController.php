@@ -27,16 +27,20 @@ class DashboardController extends Controller
             ->reverse()
             ->values();
 
-        $closed = Trade::query()
+        $stats = Trade::query()
             ->where('mode', $mode)
             ->where('status', TradeStatus::Closed)
-            ->get();
+            ->selectRaw(
+                'COUNT(*) as closed_count, '
+                    .'COALESCE(SUM(pnl), 0) as total_pnl, '
+                    .'COALESCE(SUM(entry_fee + exit_fee), 0) as total_fees, '
+                    .'SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as wins, '
+                    .'COALESCE(SUM(CASE WHEN closed_at >= ? THEN pnl ELSE 0 END), 0) as today_pnl',
+                [now('UTC')->startOfDay()]
+            )
+            ->first();
 
-        $todayPnl = (float) $closed
-            ->filter(fn (Trade $t) => $t->closed_at?->gte(now('UTC')->startOfDay()))
-            ->sum('pnl');
-
-        $wins = $closed->where('pnl', '>', 0)->count();
+        $closedCount = (int) $stats->closed_count;
 
         return view('dashboard', [
             'mode' => $mode,
@@ -45,11 +49,11 @@ class DashboardController extends Controller
                 'v' => round($s->equity, 2),
             ])->all(),
             'latestEquity' => $snapshots->last()?->equity,
-            'todayPnl' => $todayPnl,
-            'totalPnl' => (float) $closed->sum('pnl'),
-            'totalFees' => (float) $closed->sum(fn (Trade $t) => $t->entry_fee + $t->exit_fee),
-            'closedCount' => $closed->count(),
-            'winRate' => $closed->isEmpty() ? null : $wins / $closed->count(),
+            'todayPnl' => (float) $stats->today_pnl,
+            'totalPnl' => (float) $stats->total_pnl,
+            'totalFees' => (float) $stats->total_fees,
+            'closedCount' => $closedCount,
+            'winRate' => $closedCount === 0 ? null : (int) $stats->wins / $closedCount,
             'openTrades' => Trade::query()
                 ->where('mode', $mode)
                 ->where('status', TradeStatus::Open)

@@ -151,7 +151,7 @@ details summary { cursor: pointer; color: var(--text-muted); font-size: 12px; ma
                 @foreach ($openTrades as $trade)
                     <tr>
                         <td>{{ $trade->symbol }}</td>
-                        <td>{{ rtrim(rtrim(number_format($trade->quantity, 8), '0'), '.') }}</td>
+                        <td>{{ \App\Trading\Support\Num::trim($trade->quantity) }}</td>
                         <td>{{ number_format($trade->entry_price, 4) }}</td>
                         <td>{{ number_format($trade->stop_loss, 4) }}</td>
                         <td>{{ number_format($trade->take_profit, 4) }}</td>
@@ -176,7 +176,7 @@ details summary { cursor: pointer; color: var(--text-muted); font-size: 12px; ma
                         <td>{{ $trade->symbol }}</td>
                         <td>{{ number_format($trade->entry_price, 4) }}</td>
                         <td>{{ $trade->exit_price !== null ? number_format($trade->exit_price, 4) : '—' }}</td>
-                        <td>{{ rtrim(rtrim(number_format($trade->quantity, 8), '0'), '.') }}</td>
+                        <td>{{ \App\Trading\Support\Num::trim($trade->quantity) }}</td>
                         <td class="{{ $trade->pnl > 0 ? 'good' : ($trade->pnl < 0 ? 'bad' : '') }}">{{ sprintf('%+.2f', $trade->pnl ?? 0) }}</td>
                         <td>{{ $trade->close_reason }}</td>
                         <td>{{ $trade->closed_at?->format('Y-m-d H:i') }}</td>
