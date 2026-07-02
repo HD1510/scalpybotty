@@ -5,8 +5,8 @@
 #   ./backtest-remote.sh "BTCUSDT ETHUSDT" 60 "1h"    # gleiche Argumente wie backtest.sh
 #
 # Startet ./backtest.sh per SSH auf dem Server und synchronisiert danach
-# alle Reports nach LOCAL_DIR. Umgebungsvariablen wie FORCE_EXPORT=1 oder
-# SPLIT_DAYS=14 werden an den Server durchgereicht.
+# alle Reports nach LOCAL_DIR. Die Umgebungsvariablen FORCE_EXPORT=1,
+# SPLIT_DAYS=14 und STRATEGIES="bollinger_reversion" werden durchgereicht.
 
 set -euo pipefail
 
@@ -19,6 +19,7 @@ mkdir -p "$LOCAL_DIR"
 echo "==> Backtest auf $SERVER starten..."
 ssh -t "$SERVER" "cd $REMOTE_DIR && \
     FORCE_EXPORT=${FORCE_EXPORT:-0} SPLIT_DAYS=${SPLIT_DAYS:-30} \
+    STRATEGIES=\"${STRATEGIES:-ema_rsi_scalp bollinger_reversion}\" \
     ./backtest.sh \"${1:-BTCUSDT ETHUSDT SOLUSDT}\" ${2:-90} \"${3:-5m 15m 1h}\""
 
 echo
