@@ -40,25 +40,16 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
     public function candles(string $symbol, string $interval, int $limit = 100): array
     {
         // Binance includes the currently forming candle as the last row, so
-        // request one extra and drop anything that has not closed yet.
+        // request one extra (clamped to the API maximum of 1000) and drop
+        // anything that has not closed yet. Slice from the end so the newest
+        // closed candles are kept.
         $rows = $this->publicRequest('GET', '/api/v3/klines', [
             'symbol' => $symbol,
             'interval' => $interval,
-            'limit' => $limit + 1,
+            'limit' => min($limit + 1, self::KLINES_PAGE_LIMIT),
         ]);
 
-        $now = $this->nowMilliseconds();
-        $candles = [];
-
-        foreach ($rows as $row) {
-            if ((int) $row[6] >= $now) {
-                continue;
-            }
-
-            $candles[] = $this->mapKline($row);
-        }
-
-        return array_slice($candles, -$limit);
+        return array_slice($this->closedCandles($rows), -$limit);
     }
 
     public function candlesBetween(string $symbol, string $interval, int $startTime, int $endTime): array
@@ -79,15 +70,7 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
                 break;
             }
 
-            $now = $this->nowMilliseconds();
-
-            foreach ($rows as $row) {
-                if ((int) $row[6] >= $now) {
-                    continue;
-                }
-
-                $candles[] = $this->mapKline($row);
-            }
+            $candles = array_merge($candles, $this->closedCandles($rows));
 
             $lastRow = end($rows);
             $cursor = ((int) $lastRow[6]) + 1;
@@ -108,9 +91,17 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
             'symbol' => $symbol,
         ]);
 
+        $price = $data['price'] ?? null;
+
+        if (! is_numeric($price) || (float) $price <= 0) {
+            throw new ExchangeException(
+                "Binance returned no usable price for [{$symbol}] on [/api/v3/ticker/price].",
+            );
+        }
+
         return new Ticker(
             symbol: $symbol,
-            price: (float) ($data['price'] ?? 0.0),
+            price: (float) $price,
             timestamp: $this->nowMilliseconds(),
         );
     }
@@ -155,19 +146,51 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
         }
 
         $data = $this->signedRequest('POST', '/api/v3/order', $params);
+        $meta = $this->symbolMeta($request->symbol);
 
         $executedQuantity = (float) ($data['executedQty'] ?? 0.0);
         $fills = $data['fills'] ?? [];
 
         $filledQuantity = 0.0;
         $notional = 0.0;
-        $fee = 0.0;
+        $commissions = [];
 
         foreach ($fills as $fill) {
             $quantity = (float) ($fill['qty'] ?? 0.0);
             $filledQuantity += $quantity;
             $notional += $quantity * (float) ($fill['price'] ?? 0.0);
-            $fee += (float) ($fill['commission'] ?? 0.0);
+
+            $asset = (string) ($fill['commissionAsset'] ?? '');
+            $commissions[$asset] = ($commissions[$asset] ?? 0.0) + (float) ($fill['commission'] ?? 0.0);
+        }
+
+        $averagePrice = $filledQuantity > 0 ? $notional / $filledQuantity : 0.0;
+
+        // Binance denominates commission per fill (market BUYs pay in the base
+        // asset, SELLs in the quote asset, BNB-discount accounts in BNB).
+        // Quote commission is fee as-is. Base commission reduces the base
+        // amount actually received, so subtract it from executedQuantity and
+        // convert it to quote at the volume-weighted average price. Any other
+        // asset has no reliable conversion here: exclude it from fee and
+        // surface it in raw['unconverted_commissions'] instead.
+        $fee = $commissions[$meta->quoteAsset] ?? 0.0;
+        $baseCommission = $commissions[$meta->baseAsset] ?? 0.0;
+
+        if ($baseCommission > 0) {
+            $executedQuantity -= $baseCommission;
+            $fee += $baseCommission * $averagePrice;
+        }
+
+        $unconverted = array_filter(
+            $commissions,
+            fn (float $amount, string $asset): bool => $amount > 0
+                && $asset !== $meta->baseAsset
+                && $asset !== $meta->quoteAsset,
+            ARRAY_FILTER_USE_BOTH,
+        );
+
+        if ($unconverted !== []) {
+            $data['unconverted_commissions'] = $unconverted;
         }
 
         $exchangeStatus = (string) ($data['status'] ?? '');
@@ -179,9 +202,9 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
             side: $request->side,
             status: $filled ? 'filled' : 'rejected',
             executedQuantity: $executedQuantity,
-            averagePrice: $filledQuantity > 0 ? $notional / $filledQuantity : 0.0,
+            averagePrice: $averagePrice,
             fee: $fee,
-            feeAsset: $fills === [] ? '' : (string) ($fills[0]['commissionAsset'] ?? ''),
+            feeAsset: $meta->quoteAsset,
             timestamp: (int) ($data['transactTime'] ?? $this->nowMilliseconds()),
             raw: $data,
         );
@@ -269,7 +292,15 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
             throw new ExchangeException($this->errorMessage($path, $response));
         }
 
-        return (array) $response->json();
+        $body = $response->json();
+
+        if (! is_array($body)) {
+            throw new ExchangeException(
+                "Binance response on [{$path}] did not decode to a JSON array (HTTP {$response->status()}).",
+            );
+        }
+
+        return $body;
     }
 
     private function errorMessage(string $path, Response $response): string
@@ -297,6 +328,28 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
     }
 
     /**
+     * Map raw kline rows to Candles, dropping any candle that has not closed yet.
+     *
+     * @param  array<int, array<int, mixed>>  $rows  Raw Binance kline rows.
+     * @return array<int, Candle>
+     */
+    private function closedCandles(array $rows): array
+    {
+        $now = $this->nowMilliseconds();
+        $candles = [];
+
+        foreach ($rows as $row) {
+            if ((int) $row[6] >= $now) {
+                continue;
+            }
+
+            $candles[] = $this->mapKline($row);
+        }
+
+        return $candles;
+    }
+
+    /**
      * @param  array<int, mixed>  $row  Raw Binance kline row.
      */
     private function mapKline(array $row): Candle
@@ -318,6 +371,7 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
         return rtrim(rtrim(number_format($quantity, 8, '.', ''), '0'), '.');
     }
 
+    // Deliberately real wall clock: Binance signing needs it; Carbon::setTestNow must not freeze request timestamps.
     private function nowMilliseconds(): int
     {
         return (int) round(microtime(true) * 1000);
