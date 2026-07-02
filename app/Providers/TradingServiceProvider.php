@@ -7,9 +7,8 @@ use App\Trading\Contracts\Strategy;
 use App\Trading\Enums\TradingMode;
 use App\Trading\Exchanges\BinanceExchange;
 use App\Trading\Exchanges\PaperExchange;
-use App\Trading\Strategies\EmaRsiScalpStrategy;
+use App\Trading\Strategies\StrategyFactory;
 use Illuminate\Support\ServiceProvider;
-use InvalidArgumentException;
 
 class TradingServiceProvider extends ServiceProvider
 {
@@ -35,17 +34,7 @@ class TradingServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(Strategy::class, function () {
-            $name = config('trading.strategy');
-            $params = config("trading.strategies.{$name}");
-
-            if ($params === null) {
-                throw new InvalidArgumentException("Unknown trading strategy [{$name}]. Add it to config/trading.php.");
-            }
-
-            return match ($name) {
-                'ema_rsi_scalp' => new EmaRsiScalpStrategy($params),
-                default => throw new InvalidArgumentException("No implementation registered for strategy [{$name}]."),
-            };
+            return (new StrategyFactory)->make((string) config('trading.strategy'));
         });
     }
 }

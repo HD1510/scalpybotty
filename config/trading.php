@@ -97,6 +97,20 @@ return [
             // Take-profit distance = atr_tp_mult * ATR above entry.
             'atr_tp_mult' => 2.5,
         ],
+
+        'bollinger_reversion' => [
+            'bb_period' => 20,
+            'bb_std_dev' => 2.0,
+            'rsi_period' => 14,
+            // Long entries require RSI at or below this (oversold confirmation).
+            'rsi_oversold' => 30.0,
+            'atr_period' => 14,
+            // Stop-loss distance = atr_stop_mult * ATR below entry.
+            'atr_stop_mult' => 1.5,
+            // Take-profit is the middle band (mean reversion target); this is
+            // the minimum distance in ATRs it must be above entry to bother.
+            'min_tp_atr' => 0.5,
+        ],
     ],
 
     /*
