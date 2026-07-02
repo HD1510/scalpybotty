@@ -164,6 +164,28 @@ details summary { cursor: pointer; color: var(--text-muted); font-size: 12px; ma
     </div>
 
     <div class="panel">
+        <h2>Bot-Aktivität (letzte {{ count($events) }} Meldungen)</h2>
+        @if ($events->isEmpty())
+            <div class="empty">Noch keine Meldungen — der Bot schreibt hier bei jedem Tick mit, sobald er läuft.</div>
+        @else
+            <table>
+                <thead><tr><th>Zeit (UTC)</th><th style="text-align:left">Meldung</th></tr></thead>
+                <tbody>
+                @foreach ($events as $event)
+                    <tr>
+                        <td style="white-space:nowrap">{{ $event->created_at?->format('H:i:s') }}</td>
+                        <td style="text-align:left" class="{{ $event->level === 'error' ? 'bad' : '' }}">
+                            @if ($event->level === 'warning')<span style="color:var(--delta-bad)">&#9888;</span>@endif
+                            {{ $event->message }}
+                        </td>
+                    </tr>
+                @endforeach
+                </tbody>
+            </table>
+        @endif
+    </div>
+
+    <div class="panel">
         <h2>Letzte Trades</h2>
         @if ($recentTrades->isEmpty())
             <div class="empty">Noch keine abgeschlossenen Trades.</div>
@@ -238,6 +260,24 @@ details summary { cursor: pointer; color: var(--text-muted); font-size: 12px; ma
     // the equity line — single series, 2px
     const d = series.map((p, i) => (i === 0 ? 'M' : 'L') + x(i).toFixed(2) + ' ' + y(p.v).toFixed(2)).join(' ');
     el('path', { d, fill: 'none', stroke: css('--series-1'), 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+
+    // closed-trade markers on the curve: green = win, red = loss
+    const markers = @json($tradeMarkers ?? []);
+    const times = series.map(p => (p.t ? Date.parse(p.t) : 0));
+    markers.forEach(m => {
+        const mt = m.t ? Date.parse(m.t) : 0;
+        if (!mt || mt < times[0] || mt > times[times.length - 1]) return;
+        let best = 0, bestD = Infinity;
+        times.forEach((t, i) => { const dd = Math.abs(t - mt); if (dd < bestD) { bestD = dd; best = i; } });
+        const dot = el('circle', {
+            cx: x(best), cy: y(series[best].v), r: 4,
+            fill: (m.pnl ?? 0) >= 0 ? css('--delta-good') : css('--delta-bad'),
+            stroke: css('--surface-1'), 'stroke-width': 2,
+        });
+        const title = document.createElementNS(NS, 'title');
+        title.textContent = m.symbol + ' ' + (m.reason || '') + ' ' + ((m.pnl ?? 0) >= 0 ? '+' : '') + (m.pnl ?? 0).toFixed(2);
+        dot.appendChild(title);
+    });
 
     // hover layer: crosshair + marker + tooltip
     const crosshair = el('line', { x1: 0, x2: 0, y1: PAD.top, y2: H - PAD.bottom, stroke: css('--baseline'), 'stroke-width': 1, visibility: 'hidden' });

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BotEvent;
 use App\Models\EquitySnapshot;
 use App\Models\Trade;
 use App\Trading\Enums\TradeStatus;
@@ -59,6 +60,26 @@ class DashboardController extends Controller
                 ->where('status', TradeStatus::Open)
                 ->orderByDesc('opened_at')
                 ->get(),
+            'events' => BotEvent::query()
+                ->where('mode', $mode)
+                ->orderByDesc('id')
+                ->limit(50)
+                ->get(),
+            'tradeMarkers' => Trade::query()
+                ->where('mode', $mode)
+                ->where('status', TradeStatus::Closed)
+                ->whereNotNull('closed_at')
+                ->orderByDesc('closed_at')
+                ->limit(200)
+                ->get()
+                ->map(fn (Trade $t) => [
+                    't' => $t->closed_at?->toIso8601String(),
+                    'pnl' => $t->pnl,
+                    'symbol' => $t->symbol,
+                    'reason' => $t->close_reason,
+                ])
+                ->values()
+                ->all(),
             'recentTrades' => Trade::query()
                 ->where('mode', $mode)
                 ->where('status', TradeStatus::Closed)

@@ -2,6 +2,7 @@
 
 namespace App\Trading\Bot;
 
+use App\Models\BotEvent;
 use App\Models\EquitySnapshot;
 use App\Models\Order;
 use App\Models\Trade;
@@ -21,6 +22,7 @@ use App\Trading\Support\Num;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -79,7 +81,45 @@ final class TradingBot
             $lines[] = "equity snapshot failed: {$e->getMessage()}";
         }
 
+        $this->persistEvents($mode, $lines);
+
         return $lines;
+    }
+
+    /**
+     * Mirror the tick's log lines into bot_events so the dashboard can show
+     * live activity. Events older than 7 days are pruned; persistence must
+     * never break the trading loop.
+     */
+    private function persistEvents(TradingMode $mode, array $lines): void
+    {
+        try {
+            $now = now();
+
+            BotEvent::insert(array_map(fn (string $line): array => [
+                'mode' => $mode->value,
+                'level' => $this->eventLevel($line),
+                'message' => $line,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ], $lines));
+
+            BotEvent::where('created_at', '<', $now->copy()->subDays(7))->delete();
+        } catch (Throwable $e) {
+            Log::warning("could not persist bot events: {$e->getMessage()}");
+        }
+    }
+
+    private function eventLevel(string $line): string
+    {
+        $lower = strtolower($line);
+
+        return match (true) {
+            str_contains($lower, 'critical') => 'error',
+            str_contains($lower, 'failed'), str_contains($lower, 'exception'), str_contains($lower, 'error') => 'error',
+            str_contains($lower, 'rejected'), str_contains($lower, 'blocked'), str_contains($lower, 'skipped') => 'warning',
+            default => 'info',
+        };
     }
 
     /**
