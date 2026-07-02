@@ -92,7 +92,7 @@ app/Trading/
 ├── Enums/          OrderSide, SignalAction, TradeStatus, TradingMode
 ├── Exchanges/      BinanceExchange (REST, signiert), PaperExchange (Simulation)
 ├── Indicators/     EMA, SMA, RSI (Wilder), ATR, Bollinger, VWAP
-├── Strategies/     EmaRsiScalpStrategy
+├── Strategies/     EmaRsiScalp, MeanReversionBollinger, DonchianBreakout
 ├── Risk/           RiskManager: Position-Sizing, Trade-Limits, Circuit Breaker
 ├── Bot/            TradingBot: der Tick-Loop (Entry/Exit/SL/TP)
 └── Backtest/       Backtester + BacktestResult

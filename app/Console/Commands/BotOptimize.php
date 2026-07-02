@@ -44,6 +44,12 @@ final class BotOptimize extends Command
             'rsi_oversold' => [25.0, 30.0, 35.0],
             'atr_stop_mult' => [1.0, 1.5, 2.0],
         ],
+        'donchian_breakout' => [
+            'donchian_period' => [10, 20, 40],
+            'exit_period' => [5, 10, 20],
+            'chandelier_mult' => [2.0, 3.0, 4.0],
+            'atr_stop_mult' => [1.5, 2.0, 3.0],
+        ],
     ];
 
     public function handle(): int

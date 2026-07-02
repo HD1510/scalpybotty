@@ -19,7 +19,7 @@ mkdir -p "$LOCAL_DIR"
 echo "==> Backtest auf $SERVER starten..."
 ssh -t "$SERVER" "cd $REMOTE_DIR && \
     FORCE_EXPORT=${FORCE_EXPORT:-0} SPLIT_DAYS=${SPLIT_DAYS:-30} \
-    STRATEGIES=\"${STRATEGIES:-ema_rsi_scalp bollinger_reversion}\" \
+    STRATEGIES=\"${STRATEGIES:-ema_rsi_scalp bollinger_reversion donchian_breakout}\" \
     ./backtest.sh \"${1:-BTCUSDT ETHUSDT SOLUSDT}\" ${2:-90} \"${3:-5m 15m 1h}\""
 
 echo

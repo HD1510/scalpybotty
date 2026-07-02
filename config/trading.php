@@ -129,6 +129,23 @@ return [
             // the minimum distance in ATRs it must be above entry to bother.
             'min_tp_atr' => 0.5,
         ],
+
+        // Aggressive turtle-style momentum breakout: many small stop-outs,
+        // the occasional large trend ride. Complements bollinger_reversion,
+        // which only trades calm dips.
+        'donchian_breakout' => [
+            'class' => App\Trading\Strategies\DonchianBreakoutStrategy::class,
+            // Entry: close breaks the highest high of this many candles.
+            'donchian_period' => 20,
+            // Exit: close falls chandelier_mult ATRs below the highest close
+            // of the last exit_period candles.
+            'exit_period' => 10,
+            'chandelier_mult' => 3.0,
+            'atr_period' => 14,
+            'atr_stop_mult' => 2.0,
+            // Far target — winners are meant to run into the chandelier exit.
+            'atr_tp_mult' => 6.0,
+        ],
     ],
 
     /*

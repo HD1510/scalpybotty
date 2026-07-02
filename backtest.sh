@@ -21,7 +21,7 @@ SYMBOLS="${1:-BTCUSDT ETHUSDT SOLUSDT}"
 DAYS="${2:-90}"
 INTERVALS="${3:-5m 15m 1h}"
 SPLIT_DAYS="${SPLIT_DAYS:-30}"
-STRATEGIES="${STRATEGIES:-ema_rsi_scalp bollinger_reversion}"
+STRATEGIES="${STRATEGIES:-ema_rsi_scalp bollinger_reversion donchian_breakout}"
 
 REPORT_DIR="storage/app/backtests"
 STAMP=$(date -u +%Y%m%d-%H%M%S)
