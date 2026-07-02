@@ -1,0 +1,51 @@
+<?php
+
+namespace App\Providers;
+
+use App\Trading\Contracts\Exchange;
+use App\Trading\Contracts\Strategy;
+use App\Trading\Enums\TradingMode;
+use App\Trading\Exchanges\BinanceExchange;
+use App\Trading\Exchanges\PaperExchange;
+use App\Trading\Strategies\EmaRsiScalpStrategy;
+use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
+
+class TradingServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton(BinanceExchange::class, function () {
+            return new BinanceExchange(config('trading.binance'));
+        });
+
+        $this->app->singleton(Exchange::class, function ($app) {
+            $mode = TradingMode::from(config('trading.mode'));
+
+            if ($mode === TradingMode::Live) {
+                return $app->make(BinanceExchange::class);
+            }
+
+            // Paper mode: real market data from Binance, simulated fills.
+            return new PaperExchange(
+                $app->make(BinanceExchange::class),
+                config('trading.paper'),
+                config('trading.quote_asset'),
+            );
+        });
+
+        $this->app->singleton(Strategy::class, function () {
+            $name = config('trading.strategy');
+            $params = config("trading.strategies.{$name}");
+
+            if ($params === null) {
+                throw new InvalidArgumentException("Unknown trading strategy [{$name}]. Add it to config/trading.php.");
+            }
+
+            return match ($name) {
+                'ema_rsi_scalp' => new EmaRsiScalpStrategy($params),
+                default => throw new InvalidArgumentException("No implementation registered for strategy [{$name}]."),
+            };
+        });
+    }
+}
