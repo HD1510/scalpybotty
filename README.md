@@ -37,6 +37,9 @@ php artisan bot:export-data --symbol=BTCUSDT --days=30
 # ... und Backtests danach beliebig oft offline fahren (z.B. beim Parameter-Tuning)
 php artisan bot:backtest --csv=storage/app/candles/BTCUSDT-5m.csv
 
+# Strategie-Parameter per Grid-Search tunen (Ranking nach Netto-PnL)
+php artisan bot:optimize --csv=storage/app/candles/BTCUSDT-5m.csv --param=fast_ema=5,9,12
+
 # Bot im Paper-Modus laufen lassen (Standard: alle 30s ein Tick)
 php artisan bot:run
 
@@ -46,6 +49,9 @@ php artisan bot:run --once
 # Offene Positionen, PnL und Equity anzeigen
 php artisan bot:status
 ```
+
+Das **Dashboard** (Equity-Kurve, offene Positionen, letzte Trades) läuft unter
+`/dashboard` — `php artisan serve` und im Browser öffnen.
 
 **Praxis-Erkenntnis aus dem Backtest:** Auf 1m-Candles übersteigen die
 Round-Trip-Taker-Gebühren (2×0,1%) typischerweise die ATR-basierte
@@ -67,6 +73,7 @@ Alles Wichtige liegt in `config/trading.php` bzw. `.env`:
 | `TRADING_MAX_OPEN_TRADES` | `3` | Max. gleichzeitig offene Positionen |
 | `TRADING_MAX_DAILY_LOSS_PCT` | `0.03` | Tages-Verlustlimit — danach öffnet der Bot keine neuen Trades mehr (Circuit Breaker) |
 | `TRADING_PAPER_BALANCE` | `10000` | Startguthaben (Quote-Asset) im Paper-Modus |
+| `TRADING_LIVE_CONFIRMED` | `false` | Zweiter Faktor für Live-Trading: ohne dieses Flag (oder `bot:run --live-confirmed`) verweigert der Bot echte Orders — egal, wo er aufgerufen wird |
 | `BINANCE_TESTNET` | `true` | Binance Spot-Testnet statt Mainnet verwenden |
 
 Die Strategie-Parameter (EMA-Perioden, RSI-Band, ATR-Multiplikatoren) stehen
@@ -113,6 +120,6 @@ php artisan test
 
 1. Klasse unter `app/Trading/Strategies/` anlegen, die
    `App\Trading\Contracts\Strategy` implementiert.
-2. Parameter-Block unter `strategies.<name>` in `config/trading.php` ergänzen.
-3. Die Klasse im `match` in `App\Providers\TradingServiceProvider` registrieren.
-4. `TRADING_STRATEGY=<name>` setzen — Backtest zuerst!
+2. Block unter `strategies.<name>` in `config/trading.php` ergänzen —
+   inklusive `'class' => DeineStrategie::class` und der Parameter.
+3. `TRADING_STRATEGY=<name>` setzen — Backtest zuerst!
