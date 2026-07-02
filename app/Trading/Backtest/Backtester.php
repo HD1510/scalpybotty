@@ -5,23 +5,38 @@ namespace App\Trading\Backtest;
 use App\Trading\Contracts\Strategy;
 use App\Trading\Data\Candle;
 use App\Trading\Enums\SignalAction;
+use App\Trading\Risk\RiskManager;
 
 /**
  * Event-driven replay of a strategy over closed historical candles.
  *
- * No look-ahead: the signal for step i is computed from candles[0..i] only,
- * and every fill happens on candle i+1 (the next bar), never on the signal
- * bar. Fills use the same fee/slippage model as PaperExchange, and sizing
- * replicates RiskManager's fixed-fractional formula without touching the
- * database.
+ * No look-ahead: the signal for step i is computed from a fixed trailing
+ * window of candles ending at index i (mirroring the bounded history the
+ * live bot feeds the strategy), and every fill happens on candle i+1 (the
+ * next bar), never on the signal bar. The entry bar itself is checked for
+ * stop/take-profit hits immediately after the fill, and exits are
+ * gap-aware: a candle that opens through the stop fills at the (worse)
+ * open, one that opens through the take-profit fills at the (better) open.
+ *
+ * Fills use the same fee/slippage model as PaperExchange. Sizing and
+ * confidence gating are not replicas: they ARE RiskManager
+ * (positionSize() and passesConfidence(), both database-free), so the
+ * backtest cannot drift from live sizing. The daily-loss circuit breaker
+ * from RiskManager::entryBlockReason() is simulated in-memory per UTC day.
  */
 final class Backtester
 {
+    private const MS_PER_DAY = 86_400_000;
+
+    private RiskManager $riskManager;
+
     public function __construct(
         private Strategy $strategy,
         private array $riskConfig,
         private array $paperConfig,
+        private int $evaluationWindow = 150,
     ) {
+        $this->riskManager = new RiskManager($this->riskConfig);
     }
 
     /**
@@ -34,22 +49,25 @@ final class Backtester
 
         $feeRate = (float) ($this->paperConfig['fee_rate'] ?? 0.0);
         $slippage = (float) ($this->paperConfig['slippage_bps'] ?? 0.0) / 1e4;
-        $riskPerTrade = (float) ($this->riskConfig['risk_per_trade'] ?? 0.0);
-        $minConfidence = (float) ($this->riskConfig['min_confidence'] ?? 0.0);
+        $maxDailyLossPct = (float) ($this->riskConfig['max_daily_loss_pct'] ?? 0.0);
 
         $balance = $startingBalance;
         $totalFees = 0.0;
         $trades = [];
         $equityCurve = [];
 
+        /** @var array<int, float> $dailyPnl Realized pnl keyed by UTC day number. */
+        $dailyPnl = [];
+
         /** @var array{entry_time: int, entry: float, qty: float, stop: float, tp: float, fees: float}|null $position */
         $position = null;
 
-        $close = function (float $rawExit, int $exitTime, string $reason) use (
+        $close = function (float $rawExit, int $exitTime, string $reason, int $exitCandleCloseTime) use (
             &$balance,
             &$totalFees,
             &$trades,
             &$position,
+            &$dailyPnl,
             $slippage,
             $feeRate
         ): void {
@@ -59,55 +77,81 @@ final class Backtester
             $balance += $proceeds - $fee;
             $totalFees += $fee;
 
+            $pnl = ($exit - $position['entry']) * $position['qty'] - $position['fees'] - $fee;
+
+            // Realized pnl is bucketed by the UTC day of the exit candle's
+            // close, feeding the daily-loss circuit breaker below.
+            $day = intdiv($exitCandleCloseTime, self::MS_PER_DAY);
+            $dailyPnl[$day] = ($dailyPnl[$day] ?? 0.0) + $pnl;
+
             $trades[] = [
                 'entry_time' => $position['entry_time'],
                 'exit_time' => $exitTime,
                 'entry' => $position['entry'],
                 'exit' => $exit,
                 'qty' => $position['qty'],
-                'pnl' => ($exit - $position['entry']) * $position['qty'] - $position['fees'] - $fee,
+                'pnl' => $pnl,
                 'reason' => $reason,
             ];
 
             $position = null;
         };
 
+        // Resting stop/take-profit orders fill intra-candle. Checked
+        // pessimistically: when both levels lie inside the same candle, the
+        // stop-loss wins. Gap-aware: a candle that opens beyond the stop
+        // fills at the (worse) open; one that opens beyond the take-profit
+        // fills at the (better) open.
+        $checkExits = function (Candle $candle) use (&$position, $close): void {
+            if ($candle->low <= $position['stop']) {
+                $close(min($position['stop'], $candle->open), $candle->closeTime, 'stop_loss', $candle->closeTime);
+            } elseif ($candle->high >= $position['tp']) {
+                $close(max($position['tp'], $candle->open), $candle->closeTime, 'take_profit', $candle->closeTime);
+            }
+        };
+
+        // Fixed trailing evaluation window, matching the bounded candle
+        // history the live bot fetches (never below the strategy's warmup).
+        $window = max($this->evaluationWindow, $this->strategy->warmupPeriod());
+        $visible = fn (int $i): array => array_slice($candles, max(0, $i + 1 - $window), min($i + 1, $window));
+
         for ($i = $this->strategy->warmupPeriod() - 1; $i + 1 < $count; $i++) {
             $next = $candles[$i + 1];
 
             if ($position !== null) {
-                // Resting stop/take-profit orders fill intra-candle. Checked
-                // pessimistically: when both levels lie inside the same
-                // candle, the stop-loss wins.
-                if ($next->low <= $position['stop']) {
-                    $close($position['stop'], $next->closeTime, 'stop_loss');
-                } elseif ($next->high >= $position['tp']) {
-                    $close($position['tp'], $next->closeTime, 'take_profit');
-                } else {
-                    $signal = $this->strategy->evaluate(array_slice($candles, 0, $i + 1));
+                $checkExits($next);
+
+                if ($position !== null) {
+                    $signal = $this->strategy->evaluate($visible($i));
 
                     if ($signal->action === SignalAction::Sell) {
-                        $close($next->open, $next->openTime, 'signal');
+                        $close($next->open, $next->openTime, 'signal', $next->closeTime);
                     }
                 }
             } else {
-                $signal = $this->strategy->evaluate(array_slice($candles, 0, $i + 1));
+                $signal = $this->strategy->evaluate($visible($i));
 
                 if (
                     $signal->action === SignalAction::Buy
                     && $signal->stopLoss !== null
                     && $signal->takeProfit !== null
-                    && $signal->confidence >= $minConfidence
+                    && $this->riskManager->passesConfidence($signal)
                 ) {
-                    $entry = $next->open * (1 + $slippage);
-                    $stop = $signal->stopLoss;
+                    // Daily-loss circuit breaker, in parity with the live
+                    // gate in RiskManager::entryBlockReason(): once the
+                    // current UTC day's realized losses reach
+                    // max_daily_loss_pct of equity, entries stay blocked
+                    // until the next UTC day.
+                    $dayPnl = $dailyPnl[intdiv($next->openTime, self::MS_PER_DAY)] ?? 0.0;
+                    $breakerTripped = $maxDailyLossPct > 0
+                        && $balance > 0
+                        && $dayPnl <= -($maxDailyLossPct * $balance);
 
-                    if ($entry > 0 && $stop < $entry && $balance > 0) {
+                    if (! $breakerTripped) {
+                        $entry = $next->open * (1 + $slippage);
+
                         // While flat, equity equals the quote balance.
-                        $qty = min(
-                            ($riskPerTrade * $balance) / ($entry - $stop),
-                            ($balance * 0.99) / $entry,
-                        );
+                        $qty = $this->riskManager->positionSize($balance, $balance, $entry, $signal->stopLoss);
 
                         if ($qty > 0) {
                             $fee = $feeRate * $qty * $entry;
@@ -118,10 +162,14 @@ final class Backtester
                                 'entry_time' => $next->openTime,
                                 'entry' => $entry,
                                 'qty' => $qty,
-                                'stop' => $stop,
+                                'stop' => $signal->stopLoss,
                                 'tp' => $signal->takeProfit,
                                 'fees' => $fee,
                             ];
+
+                            // The entry bar itself can already reach the stop
+                            // or take-profit; check it before advancing.
+                            $checkExits($next);
                         }
                     }
                 }
@@ -132,7 +180,7 @@ final class Backtester
 
         if ($position !== null) {
             $last = $candles[$count - 1];
-            $close($last->close, $last->closeTime, 'end_of_data');
+            $close($last->close, $last->closeTime, 'end_of_data', $last->closeTime);
             $equityCurve[] = $balance;
         }
 
