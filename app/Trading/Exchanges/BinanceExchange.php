@@ -11,6 +11,7 @@ use App\Trading\Data\SymbolMeta;
 use App\Trading\Data\Ticker;
 use App\Trading\Exceptions\ExchangeException;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -258,6 +259,10 @@ final class BinanceExchange implements Exchange, HistoricalDataProvider
                 0,
                 $exception,
             );
+        } catch (RequestException $exception) {
+            // Guzzle errors that carry a response (e.g. a proxy answering the
+            // CONNECT with 403) are marshalled past the failed() check below.
+            throw new ExchangeException($this->errorMessage($path, $exception->response), 0, $exception);
         }
 
         if ($response->failed()) {
