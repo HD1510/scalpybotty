@@ -27,18 +27,22 @@ return [
 
     'exchange' => env('TRADING_EXCHANGE', 'binance'),
 
-    // Comma-separated list in .env, e.g. "BTCUSDT,ETHUSDT"
-    'symbols' => array_filter(array_map('trim', explode(',', env('TRADING_SYMBOLS', 'BTCUSDT')))),
+    // Comma-separated list in .env. The default strategy trades roughly once
+    // a month per symbol, so several symbols keep the bot meaningfully busy.
+    'symbols' => array_filter(array_map('trim', explode(',', env('TRADING_SYMBOLS', 'BTCUSDT,ETHUSDT,SOLUSDT')))),
 
-    // Candle interval the strategy runs on. Below 5m, round-trip taker fees
-    // tend to exceed the ATR-based take-profit distance — backtest first.
-    'interval' => env('TRADING_INTERVAL', '5m'),
+    // Candle interval the strategy runs on. 90-day mainnet backtests showed
+    // nothing survives round-trip taker fees below 1h — backtest first.
+    'interval' => env('TRADING_INTERVAL', '1h'),
 
     // Quote asset all balances and PnL are denominated in.
     'quote_asset' => env('TRADING_QUOTE_ASSET', 'USDT'),
 
-    // Strategy to run; must be a key of 'strategies' below.
-    'strategy' => env('TRADING_STRATEGY', 'ema_rsi_scalp'),
+    // Strategy to run; must be a key of 'strategies' below. The EMA scalper
+    // remains available for experiments but lost decisively on every
+    // timeframe in 90-day backtests — bollinger_reversion on 1h was the
+    // only configuration that held up out-of-sample.
+    'strategy' => env('TRADING_STRATEGY', 'bollinger_reversion'),
 
     // How many candles to fetch per evaluation. Must exceed the strategy's warmup.
     'candle_limit' => (int) env('TRADING_CANDLE_LIMIT', 150),

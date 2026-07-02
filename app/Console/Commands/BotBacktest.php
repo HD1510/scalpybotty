@@ -78,7 +78,9 @@ final class BotBacktest extends Command
             ['Win rate', sprintf('%.1f%%', $result->winRate * 100)],
             ['Gross profit', sprintf('%.2f', $result->grossProfit)],
             ['Gross loss', sprintf('%.2f', $result->grossLoss)],
-            ['Profit factor', sprintf('%.2f', $result->profitFactor)],
+            ['Profit factor', $result->grossLoss == 0.0 && $result->grossProfit > 0
+                ? '∞ (no losses)'
+                : sprintf('%.2f', $result->profitFactor)],
             ['Net PnL', sprintf('%+.2f', $result->netPnl)],
             ['Net PnL %', sprintf('%+.2f%%', $result->netPnlPct * 100)],
             ['Total fees', sprintf('%.2f', $result->totalFees)],

@@ -1,9 +1,10 @@
 # scalpybotty
 
-Ein Crypto-Scalping-Bot auf Laravel-Basis. Handelt Spot-Märkte auf Binance
-(Mainnet oder Testnet) mit einer EMA-Crossover-Strategie, RSI-Momentum-Filter
-und ATR-basierten Stops — standardmäßig im **Paper-Modus**: echte Marktdaten,
-simulierte Orders, kein echtes Geld.
+Ein Crypto-Trading-Bot auf Laravel-Basis. Handelt Spot-Märkte auf Binance
+(Mainnet oder Testnet), standardmäßig mit einer Bollinger-Mean-Reversion-
+Strategie auf 1h-Candles (Einstiegs-Bestätigung, Trend-Filter, ATR-Stops);
+ein EMA-Crossover-Scalper liegt als zweite Strategie bei. Default ist der
+**Paper-Modus**: echte Marktdaten, simulierte Orders, kein echtes Geld.
 
 > **Risiko-Warnung:** Kein Trading-Bot ist garantiert profitabel — auch dieser
 > nicht. Scalping ist wegen Gebühren und Slippage besonders unversöhnlich.
@@ -53,11 +54,14 @@ php artisan bot:status
 Das **Dashboard** (Equity-Kurve, offene Positionen, letzte Trades) läuft unter
 `/dashboard` — `php artisan serve` und im Browser öffnen.
 
-**Praxis-Erkenntnis aus dem Backtest:** Auf 1m-Candles übersteigen die
-Round-Trip-Taker-Gebühren (2×0,1%) typischerweise die ATR-basierte
-Take-Profit-Distanz — die Strategie verliert dann strukturell, egal wie gut
-die Signale sind. Default ist deshalb `5m`. Prüfe nach jedem Parameter-Tuning
-im Report, dass `Total fees` klein gegenüber `Gross profit` bleibt.
+**Praxis-Erkenntnis aus 90 Tagen Mainnet-Backtests:** Unterhalb von
+1h-Candles übersteigen die Round-Trip-Taker-Gebühren (2×0,1%) die
+erzielbaren Kursbewegungen — jede getestete Konfiguration verlor dort
+strukturell, egal wie gut die Signale waren. Default ist deshalb
+`bollinger_reversion` auf `1h` über mehrere Symbole (die einzige
+Kombination, die out-of-sample bestand). Prüfe nach jedem
+Parameter-Tuning im Report, dass `Total fees` klein gegenüber
+`Gross profit` bleibt.
 
 ## Konfiguration
 
@@ -66,9 +70,9 @@ Alles Wichtige liegt in `config/trading.php` bzw. `.env`:
 | Variable | Default | Bedeutung |
 |---|---|---|
 | `TRADING_MODE` | `paper` | `paper` = simulierte Orders, `live` = echtes Geld |
-| `TRADING_SYMBOLS` | `BTCUSDT` | Kommagetrennte Handelspaare |
-| `TRADING_INTERVAL` | `1m` | Candle-Intervall der Strategie |
-| `TRADING_STRATEGY` | `ema_rsi_scalp` | Strategie-Key aus `config/trading.php` |
+| `TRADING_SYMBOLS` | `BTCUSDT,ETHUSDT,SOLUSDT` | Kommagetrennte Handelspaare |
+| `TRADING_INTERVAL` | `1h` | Candle-Intervall der Strategie |
+| `TRADING_STRATEGY` | `bollinger_reversion` | Strategie-Key aus `config/trading.php` |
 | `TRADING_RISK_PER_TRADE` | `0.01` | Anteil der Equity, der pro Trade riskiert wird |
 | `TRADING_MAX_OPEN_TRADES` | `3` | Max. gleichzeitig offene Positionen |
 | `TRADING_MAX_DAILY_LOSS_PCT` | `0.03` | Tages-Verlustlimit — danach öffnet der Bot keine neuen Trades mehr (Circuit Breaker) |
@@ -76,8 +80,8 @@ Alles Wichtige liegt in `config/trading.php` bzw. `.env`:
 | `TRADING_LIVE_CONFIRMED` | `false` | Zweiter Faktor für Live-Trading: ohne dieses Flag (oder `bot:run --live-confirmed`) verweigert der Bot echte Orders — egal, wo er aufgerufen wird |
 | `BINANCE_TESTNET` | `true` | Binance Spot-Testnet statt Mainnet verwenden |
 
-Die Strategie-Parameter (EMA-Perioden, RSI-Band, ATR-Multiplikatoren) stehen
-unter `strategies.ema_rsi_scalp` in `config/trading.php`.
+Die Strategie-Parameter (Bollinger-Band, RSI-Schwellen, Trend-EMA,
+ATR-Multiplikatoren) stehen unter `strategies.*` in `config/trading.php`.
 
 ## Architektur
 
