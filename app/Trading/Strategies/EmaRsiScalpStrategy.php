@@ -76,7 +76,9 @@ final class EmaRsiScalpStrategy implements Strategy
                 return Signal::hold('degenerate stop');
             }
 
-            $confidence = 0.6 + 0.4 * ($rsi[$i] - $rsiMin) / ($rsiMax - $rsiMin);
+            // Guard against division by zero when the RSI entry band collapses to a point.
+            $rsiBand = $rsiMax - $rsiMin;
+            $confidence = $rsiBand <= 0 ? 0.6 : 0.6 + 0.4 * ($rsi[$i] - $rsiMin) / $rsiBand;
             $confidence = max(0.0, min(1.0, $confidence));
 
             return new Signal(

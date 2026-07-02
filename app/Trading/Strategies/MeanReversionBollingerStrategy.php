@@ -72,7 +72,9 @@ final class MeanReversionBollingerStrategy implements Strategy
                 return Signal::hold('target too close to cover fees');
             }
 
-            $confidence = 0.6 + 0.4 * min(1.0, ($rsiOversold - $rsi[$i]) / $rsiOversold);
+            // Guard against division by zero: at threshold 0, RSI 0 is maximal oversold.
+            $depth = $rsiOversold <= 0 ? 1.0 : min(1.0, ($rsiOversold - $rsi[$i]) / $rsiOversold);
+            $confidence = 0.6 + 0.4 * $depth;
             $confidence = max(0.0, min(1.0, $confidence));
 
             return new Signal(
