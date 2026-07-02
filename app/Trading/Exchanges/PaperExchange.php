@@ -60,16 +60,7 @@ final class PaperExchange implements Exchange, HistoricalDataProvider
 
     public function balance(string $asset): float
     {
-        $row = PaperBalance::query()->firstWhere('asset', $asset);
-
-        if ($row === null && $asset === $this->quoteAsset) {
-            $row = PaperBalance::query()->create([
-                'asset' => $asset,
-                'amount' => (float) $this->paperConfig['starting_balance'],
-            ]);
-        }
-
-        return $row?->amount ?? 0.0;
+        return $this->findOrSeed($asset);
     }
 
     public function placeOrder(OrderRequest $request): OrderResult
@@ -143,13 +134,30 @@ final class PaperExchange implements Exchange, HistoricalDataProvider
         );
     }
 
-    /**
-     * Free balance read under a row lock; the quote asset row is seeded with
-     * the configured starting balance on first access.
-     */
+    /** Free balance read under a row lock (see findOrSeed for seeding rules). */
     private function lockedBalance(string $asset): float
     {
-        $row = PaperBalance::query()->lockForUpdate()->firstWhere('asset', $asset);
+        return $this->findOrSeed($asset, lock: true);
+    }
+
+    /**
+     * Return the free balance for an asset, optionally under a row lock.
+     *
+     * The quote asset row is seeded with the configured starting balance on
+     * first access — any balance read creates it, not just order placement;
+     * tests rely on this. Caveat: seeding is keyed to the *current* quote
+     * asset, so changing TRADING_QUOTE_ASSET mid-experiment mints a fresh
+     * starting balance for the new asset while the old row keeps its funds.
+     */
+    private function findOrSeed(string $asset, bool $lock = false): float
+    {
+        $query = PaperBalance::query();
+
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        $row = $query->firstWhere('asset', $asset);
 
         if ($row === null && $asset === $this->quoteAsset) {
             $row = PaperBalance::query()->create([

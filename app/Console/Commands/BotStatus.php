@@ -8,6 +8,7 @@ use App\Trading\Contracts\Exchange;
 use App\Trading\Enums\TradeStatus;
 use App\Trading\Enums\TradingMode;
 use App\Trading\Exceptions\ExchangeException;
+use App\Trading\Support\Num;
 use Illuminate\Console\Command;
 
 final class BotStatus extends Command
@@ -100,19 +101,20 @@ final class BotStatus extends Command
 
         if ($mode === TradingMode::Paper) {
             $this->newLine();
-            $balances = PaperBalance::query()->orderBy('asset')->get();
 
-            if ($balances->isEmpty()) {
-                $this->line('Paper balances: none yet — the starting balance is credited on the first bot:run.');
-            } else {
-                $this->table(
-                    ['Asset', 'Amount'],
-                    $balances->map(fn (PaperBalance $balance): array => [
+            // The equity read above already seeded the quote asset balance
+            // (PaperExchange seeds it on first access), so at least one row
+            // always exists here.
+            $this->table(
+                ['Asset', 'Amount'],
+                PaperBalance::query()
+                    ->orderBy('asset')
+                    ->get()
+                    ->map(fn (PaperBalance $balance): array => [
                         $balance->asset,
                         $this->num($balance->amount),
                     ])->all(),
-                );
-            }
+            );
         }
 
         return self::SUCCESS;
@@ -121,8 +123,6 @@ final class BotStatus extends Command
     /** Compact number formatting: up to 8 decimals, trailing zeros trimmed. */
     private function num(float $value): string
     {
-        $formatted = rtrim(rtrim(number_format($value, 8, '.', ''), '0'), '.');
-
-        return $formatted === '' || $formatted === '-' ? '0' : $formatted;
+        return Num::trim($value);
     }
 }
