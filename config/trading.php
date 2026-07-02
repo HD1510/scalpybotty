@@ -144,8 +144,11 @@ return [
         // which only trades calm dips.
         'donchian_breakout' => [
             'class' => App\Trading\Strategies\DonchianBreakoutStrategy::class,
-            // Only take breakouts above this EMA (0 disables the regime filter).
-            'trend_ema' => 200,
+            // Only take breakouts above this EMA (0 disables the regime
+            // filter). Tested over 365d on BTC/ETH/SOL: helped BTC, cut off
+            // the profitable trades on ETH/SOL — net negative, so off by
+            // default; kept as an option for other markets.
+            'trend_ema' => 0,
             // Entry: close breaks the highest high of this many candles.
             'donchian_period' => 20,
             // Exit: close falls chandelier_mult ATRs below the highest close
