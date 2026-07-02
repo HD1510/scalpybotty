@@ -26,8 +26,9 @@ return [
     // Comma-separated list in .env, e.g. "BTCUSDT,ETHUSDT"
     'symbols' => array_filter(array_map('trim', explode(',', env('TRADING_SYMBOLS', 'BTCUSDT')))),
 
-    // Candle interval the strategy runs on.
-    'interval' => env('TRADING_INTERVAL', '1m'),
+    // Candle interval the strategy runs on. Below 5m, round-trip taker fees
+    // tend to exceed the ATR-based take-profit distance — backtest first.
+    'interval' => env('TRADING_INTERVAL', '5m'),
 
     // Quote asset all balances and PnL are denominated in.
     'quote_asset' => env('TRADING_QUOTE_ASSET', 'USDT'),

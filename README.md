@@ -31,6 +31,12 @@ Für den Paper-Modus ist **kein API-Key nötig** — Marktdaten kommen über die
 # Strategie gegen echte historische Daten testen (empfohlener erster Schritt)
 php artisan bot:backtest --symbol=BTCUSDT --days=14
 
+# Historische Daten einmalig als CSV exportieren ...
+php artisan bot:export-data --symbol=BTCUSDT --days=30
+
+# ... und Backtests danach beliebig oft offline fahren (z.B. beim Parameter-Tuning)
+php artisan bot:backtest --csv=storage/app/candles/BTCUSDT-5m.csv
+
 # Bot im Paper-Modus laufen lassen (Standard: alle 30s ein Tick)
 php artisan bot:run
 
@@ -40,6 +46,12 @@ php artisan bot:run --once
 # Offene Positionen, PnL und Equity anzeigen
 php artisan bot:status
 ```
+
+**Praxis-Erkenntnis aus dem Backtest:** Auf 1m-Candles übersteigen die
+Round-Trip-Taker-Gebühren (2×0,1%) typischerweise die ATR-basierte
+Take-Profit-Distanz — die Strategie verliert dann strukturell, egal wie gut
+die Signale sind. Default ist deshalb `5m`. Prüfe nach jedem Parameter-Tuning
+im Report, dass `Total fees` klein gegenüber `Gross profit` bleibt.
 
 ## Konfiguration
 

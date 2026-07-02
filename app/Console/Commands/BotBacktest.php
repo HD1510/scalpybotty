@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Trading\Backtest\Backtester;
+use App\Trading\Backtest\CsvCandleStore;
 use App\Trading\Contracts\Exchange;
 use App\Trading\Contracts\HistoricalDataProvider;
 use App\Trading\Contracts\Strategy;
@@ -10,13 +11,15 @@ use App\Trading\Exceptions\ExchangeException;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
+use RuntimeException;
 
 final class BotBacktest extends Command
 {
     protected $signature = 'bot:backtest
         {--symbol= : Symbol to backtest (defaults to the first of trading.symbols)}
         {--days=7 : How many days of history to replay}
-        {--interval= : Candle interval (defaults to trading.interval)}';
+        {--interval= : Candle interval (defaults to trading.interval)}
+        {--csv= : Replay candles from a CSV file (see bot:export-data) instead of fetching from the exchange}';
 
     protected $description = 'Replay the configured strategy over historical candles and report performance';
 
@@ -32,30 +35,44 @@ final class BotBacktest extends Command
             return self::FAILURE;
         }
 
-        if (! $exchange instanceof HistoricalDataProvider) {
-            $this->error(sprintf(
-                'Exchange [%s] cannot provide historical data; backtesting needs a HistoricalDataProvider implementation.',
-                $exchange->name(),
-            ));
+        $csvPath = (string) $this->option('csv');
 
-            return self::FAILURE;
-        }
+        if ($csvPath !== '') {
+            $this->info(sprintf('Backtesting %s against candles from %s...', $symbol, $csvPath));
 
-        $endTime = now('UTC')->getTimestampMs();
-        $startTime = $endTime - $days * 86_400_000;
+            try {
+                $candles = (new CsvCandleStore)->read($csvPath);
+            } catch (RuntimeException $e) {
+                $this->error($e->getMessage());
 
-        $this->info(sprintf('Backtesting %s %s over the last %d day(s)...', $symbol, $interval, $days));
+                return self::FAILURE;
+            }
+        } else {
+            if (! $exchange instanceof HistoricalDataProvider) {
+                $this->error(sprintf(
+                    'Exchange [%s] cannot provide historical data; backtesting needs a HistoricalDataProvider implementation.',
+                    $exchange->name(),
+                ));
 
-        try {
-            $candles = $exchange->candlesBetween($symbol, $interval, $startTime, $endTime);
-        } catch (ExchangeException $e) {
-            $this->error("Failed to fetch candles: {$e->getMessage()}");
+                return self::FAILURE;
+            }
 
-            return self::FAILURE;
+            $endTime = now('UTC')->getTimestampMs();
+            $startTime = $endTime - $days * 86_400_000;
+
+            $this->info(sprintf('Backtesting %s %s over the last %d day(s)...', $symbol, $interval, $days));
+
+            try {
+                $candles = $exchange->candlesBetween($symbol, $interval, $startTime, $endTime);
+            } catch (ExchangeException $e) {
+                $this->error("Failed to fetch candles: {$e->getMessage()}");
+
+                return self::FAILURE;
+            }
         }
 
         if ($candles === []) {
-            $this->warn('The exchange returned 0 candles — check your network connection, symbol and interval.');
+            $this->warn('Got 0 candles — check your network connection, symbol, interval or CSV file.');
 
             return self::FAILURE;
         }
