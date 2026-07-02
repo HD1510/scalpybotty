@@ -77,6 +77,8 @@ Alles Wichtige liegt in `config/trading.php` bzw. `.env`:
 | `TRADING_MAX_OPEN_TRADES` | `3` | Max. gleichzeitig offene Positionen |
 | `TRADING_MAX_DAILY_LOSS_PCT` | `0.03` | Tages-Verlustlimit — danach öffnet der Bot keine neuen Trades mehr (Circuit Breaker) |
 | `TRADING_PAPER_BALANCE` | `10000` | Startguthaben (Quote-Asset) im Paper-Modus |
+| `TRADING_PAPER_MAKER_ENTRIES` | `false` | Entries als Maker-Limit simulieren (0,075% statt 0,1%) — optimistische Annahme: jede Limit-Order füllt |
+| `TRADING_FEE_BNB_DISCOUNT` | `false` | 25% Gebührenrabatt (BNB) auf beide Seiten simulieren |
 | `TRADING_LIVE_CONFIRMED` | `false` | Zweiter Faktor für Live-Trading: ohne dieses Flag (oder `bot:run --live-confirmed`) verweigert der Bot echte Orders — egal, wo er aufgerufen wird |
 | `BINANCE_TESTNET` | `true` | Binance Spot-Testnet statt Mainnet verwenden |
 

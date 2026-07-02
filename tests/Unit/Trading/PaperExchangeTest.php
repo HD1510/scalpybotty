@@ -118,4 +118,28 @@ class PaperExchangeTest extends TestCase
 
         $this->exchange->placeOrder(new OrderRequest('BTCUSDT', OrderSide::Buy, 0.0));
     }
+
+    public function test_maker_entries_and_bnb_discount_reduce_fees(): void
+    {
+        $exchange = new PaperExchange(
+            $this->marketData,
+            [
+                'starting_balance' => 10000.0,
+                'fee_rate' => 0.001,
+                'maker_fee_rate' => 0.00075,
+                'maker_entries' => true,
+                'fee_bnb_discount' => true,
+                'slippage_bps' => 0.0,
+            ],
+            'USDT',
+        );
+
+        // Entry (buy) at maker rate with BNB discount: 0.00075 * 0.75 * 1000.
+        $buy = $exchange->placeOrder(new OrderRequest('BTCUSDT', OrderSide::Buy, 10.0));
+        $this->assertEqualsWithDelta(0.5625, $buy->fee, 1e-9);
+
+        // Exit (sell) stays taker, discounted: 0.001 * 0.75 * 1000.
+        $sell = $exchange->placeOrder(new OrderRequest('BTCUSDT', OrderSide::Sell, 10.0));
+        $this->assertEqualsWithDelta(0.75, $sell->fee, 1e-9);
+    }
 }

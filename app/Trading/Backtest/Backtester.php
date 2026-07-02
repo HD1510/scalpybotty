@@ -47,7 +47,13 @@ final class Backtester
         $candles = array_values($candles);
         $count = count($candles);
 
-        $feeRate = (float) ($this->paperConfig['fee_rate'] ?? 0.0);
+        // Exits are stop/market orders (taker); entries can optionally be
+        // modelled as maker limit fills. BNB discount shaves 25% off both.
+        $discount = ($this->paperConfig['fee_bnb_discount'] ?? false) ? 0.75 : 1.0;
+        $feeRate = (float) ($this->paperConfig['fee_rate'] ?? 0.0) * $discount;
+        $entryFeeRate = ($this->paperConfig['maker_entries'] ?? false)
+            ? (float) ($this->paperConfig['maker_fee_rate'] ?? 0.0) * $discount
+            : $feeRate;
         $slippage = (float) ($this->paperConfig['slippage_bps'] ?? 0.0) / 1e4;
         $maxDailyLossPct = (float) ($this->riskConfig['max_daily_loss_pct'] ?? 0.0);
         $cooldownMs = (int) ($this->riskConfig['entry_cooldown_minutes'] ?? 0) * 60_000;
@@ -165,7 +171,7 @@ final class Backtester
                         $qty = $this->riskManager->positionSize($balance, $balance, $entry, $signal->stopLoss);
 
                         if ($qty > 0) {
-                            $fee = $feeRate * $qty * $entry;
+                            $fee = $entryFeeRate * $qty * $entry;
                             $balance -= $qty * $entry + $fee;
                             $totalFees += $fee;
 

@@ -85,7 +85,13 @@ final class PaperExchange implements Exchange, HistoricalDataProvider
             ? $ticker->price * (1 + $slippage)
             : $ticker->price * (1 - $slippage);
 
-        $fee = (float) $this->paperConfig['fee_rate'] * $request->quantity * $fillPrice;
+        // Buys are entries (optionally modelled as maker limit fills), sells
+        // are stop/market exits (taker). BNB discount shaves 25% off both.
+        $discount = ($this->paperConfig['fee_bnb_discount'] ?? false) ? 0.75 : 1.0;
+        $feeRate = $request->side === OrderSide::Buy && ($this->paperConfig['maker_entries'] ?? false)
+            ? (float) ($this->paperConfig['maker_fee_rate'] ?? 0.0)
+            : (float) $this->paperConfig['fee_rate'];
+        $fee = $feeRate * $discount * $request->quantity * $fillPrice;
 
         DB::transaction(function () use ($request, $meta, $fillPrice, $fee): void {
             if ($request->side === OrderSide::Buy) {

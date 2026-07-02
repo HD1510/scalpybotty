@@ -67,6 +67,25 @@ class DonchianBreakoutStrategyTest extends TestCase
         $this->assertSame(SignalAction::Hold, $strategy->evaluate([])->action);
     }
 
+    public function test_trend_filter_suppresses_breakouts_in_downtrend_regime(): void
+    {
+        // Decline from 130, then a flat base at 100 long enough that the
+        // transition candle leaves the donchian window, and a pop to 103:
+        // the pop breaks the 10-period high (~100.1) but stays below the
+        // EMA(15), which still carries the decline (~105).
+        $closes = array_merge(range(130, 112, 2), array_fill(0, 12, 100.0), [103.0]);
+
+        $filtered = new DonchianBreakoutStrategy(['trend_ema' => 15] + self::PARAMS);
+        $signal = $filtered->evaluate($this->series($closes));
+
+        $this->assertSame(SignalAction::Hold, $signal->action);
+        $this->assertStringContainsString('trend EMA', $signal->reason);
+
+        // Without the filter the identical breakout is taken.
+        $unfiltered = new DonchianBreakoutStrategy(self::PARAMS);
+        $this->assertSame(SignalAction::Buy, $unfiltered->evaluate($this->series($closes))->action);
+    }
+
     /**
      * @return Candle[]
      */

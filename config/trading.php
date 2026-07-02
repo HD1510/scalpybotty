@@ -83,6 +83,15 @@ return [
         'starting_balance' => (float) env('TRADING_PAPER_BALANCE', 10000.0),
         // Taker fee per order (0.001 = 0.1%, Binance default).
         'fee_rate' => (float) env('TRADING_PAPER_FEE_RATE', 0.001),
+        // Maker fee per order (Binance spot default 0.075% for limit fills).
+        'maker_fee_rate' => (float) env('TRADING_PAPER_MAKER_FEE_RATE', 0.00075),
+        // Charge ENTRIES at the maker rate. Models placing the entry as a
+        // limit order at the signal price. OPTIMISTIC assumption: every limit
+        // is assumed filled — in reality some entries would be missed, so
+        // treat results as an upper bound of the maker advantage.
+        'maker_entries' => (bool) env('TRADING_PAPER_MAKER_ENTRIES', false),
+        // 25% fee discount for paying fees in BNB (applies to both sides).
+        'fee_bnb_discount' => (bool) env('TRADING_FEE_BNB_DISCOUNT', false),
         // Simulated slippage in basis points applied against the trader.
         'slippage_bps' => (float) env('TRADING_PAPER_SLIPPAGE_BPS', 5.0),
     ],
@@ -135,6 +144,8 @@ return [
         // which only trades calm dips.
         'donchian_breakout' => [
             'class' => App\Trading\Strategies\DonchianBreakoutStrategy::class,
+            // Only take breakouts above this EMA (0 disables the regime filter).
+            'trend_ema' => 200,
             // Entry: close breaks the highest high of this many candles.
             'donchian_period' => 20,
             // Exit: close falls chandelier_mult ATRs below the highest close

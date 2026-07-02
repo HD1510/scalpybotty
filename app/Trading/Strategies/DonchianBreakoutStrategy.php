@@ -36,6 +36,7 @@ final class DonchianBreakoutStrategy implements Strategy
             (int) $this->params['donchian_period'] + 1,
             (int) $this->params['exit_period'],
             (int) $this->params['atr_period'] + 1,
+            (int) ($this->params['trend_ema'] ?? 0),
         ) + 2;
     }
 
@@ -64,6 +65,25 @@ final class DonchianBreakoutStrategy implements Strategy
             static fn (Candle $candle): float => $candle->high,
             array_slice($candles, $i - $donchianPeriod, $donchianPeriod),
         ));
+
+        // Regime filter: breakouts are only taken while the market trades
+        // above its trend EMA — BTC's 2025 chop showed breakouts in
+        // non-trending regimes just bleed whipsaws (0 disables).
+        $trendEmaPeriod = (int) ($this->params['trend_ema'] ?? 0);
+
+        if ($close > $priorHigh && $trendEmaPeriod > 0) {
+            $closes = array_map(static fn (Candle $candle): float => $candle->close, $candles);
+            $trendValue = Indicators::ema($closes, $trendEmaPeriod)[$i];
+
+            if ($trendValue === null || $close < $trendValue) {
+                return Signal::hold(sprintf(
+                    'breakout suppressed — close %.4f below trend EMA(%d) %.4f (no trend regime)',
+                    $close,
+                    $trendEmaPeriod,
+                    $trendValue ?? 0.0,
+                ));
+            }
+        }
 
         if ($close > $priorHigh) {
             $entry = $close;
