@@ -56,6 +56,18 @@ final class CsvCandleStore
                     throw new RuntimeException("Candle CSV [{$path}] line {$line}: expected 7 columns, got ".count($row).'.');
                 }
 
+                foreach (self::HEADER as $index => $column) {
+                    if (! is_numeric($row[$index])) {
+                        throw new RuntimeException(sprintf(
+                            'Candle CSV [%s] line %d: column [%s] has non-numeric value [%s].',
+                            $path,
+                            $line,
+                            $column,
+                            (string) $row[$index],
+                        ));
+                    }
+                }
+
                 $candles[] = new Candle(
                     openTime: (int) $row[0],
                     open: (float) $row[1],

@@ -2,15 +2,15 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Commands\Concerns\LoadsCandles;
 use App\Trading\Backtest\CsvCandleStore;
-use App\Trading\Contracts\Exchange;
-use App\Trading\Contracts\HistoricalDataProvider;
-use App\Trading\Exceptions\ExchangeException;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 
 final class BotExportData extends Command
 {
+    use LoadsCandles;
+
     protected $signature = 'bot:export-data
         {--symbol= : Symbol to export (defaults to the first of trading.symbols)}
         {--days=30 : How many days of history to fetch}
@@ -19,7 +19,7 @@ final class BotExportData extends Command
 
     protected $description = 'Download historical candles to a CSV file for offline backtesting (bot:backtest --csv=...)';
 
-    public function handle(Exchange $exchange, CsvCandleStore $store): int
+    public function handle(CsvCandleStore $store): int
     {
         $symbol = (string) ($this->option('symbol') ?: Arr::first((array) config('trading.symbols'), null, ''));
         $interval = (string) ($this->option('interval') ?: config('trading.interval'));
@@ -32,22 +32,11 @@ final class BotExportData extends Command
             return self::FAILURE;
         }
 
-        if (! $exchange instanceof HistoricalDataProvider) {
-            $this->error(sprintf('Exchange [%s] cannot provide historical data.', $exchange->name()));
-
-            return self::FAILURE;
-        }
-
-        $endTime = now('UTC')->getTimestampMs();
-        $startTime = $endTime - $days * 86_400_000;
-
         $this->info(sprintf('Fetching %s %s candles for the last %d day(s)...', $symbol, $interval, $days));
 
-        try {
-            $candles = $exchange->candlesBetween($symbol, $interval, $startTime, $endTime);
-        } catch (ExchangeException $e) {
-            $this->error("Failed to fetch candles: {$e->getMessage()}");
+        $candles = $this->fetchCandlesFromExchange($symbol, $interval, $days);
 
+        if ($candles === null) {
             return self::FAILURE;
         }
 

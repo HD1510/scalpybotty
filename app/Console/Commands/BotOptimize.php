@@ -2,18 +2,18 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Commands\Concerns\LoadsCandles;
 use App\Trading\Backtest\Backtester;
-use App\Trading\Backtest\CsvCandleStore;
-use App\Trading\Contracts\Exchange;
-use App\Trading\Contracts\HistoricalDataProvider;
-use App\Trading\Exceptions\ExchangeException;
 use App\Trading\Strategies\StrategyFactory;
+use App\Trading\Support\Num;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 use RuntimeException;
 
 final class BotOptimize extends Command
 {
+    use LoadsCandles;
+
     protected $signature = 'bot:optimize
         {--strategy= : Strategy to tune (defaults to trading.strategy)}
         {--csv= : Candle CSV to replay (recommended; see bot:export-data)}
@@ -44,7 +44,7 @@ final class BotOptimize extends Command
         ],
     ];
 
-    public function handle(Exchange $exchange): int
+    public function handle(): int
     {
         $name = (string) ($this->option('strategy') ?: config('trading.strategy'));
         $baseParams = config("trading.strategies.{$name}");
@@ -69,41 +69,13 @@ final class BotOptimize extends Command
 
         if ($csvPath !== '') {
             $this->info(sprintf('Optimizing [%s] on %s against candles from %s...', $name, $symbol, $csvPath));
-
-            try {
-                $candles = (new CsvCandleStore)->read($csvPath);
-            } catch (RuntimeException $e) {
-                $this->error($e->getMessage());
-
-                return self::FAILURE;
-            }
         } else {
-            if (! $exchange instanceof HistoricalDataProvider) {
-                $this->error(sprintf(
-                    'Exchange [%s] cannot provide historical data; optimizing needs a HistoricalDataProvider implementation.',
-                    $exchange->name(),
-                ));
-
-                return self::FAILURE;
-            }
-
-            $endTime = now('UTC')->getTimestampMs();
-            $startTime = $endTime - $days * 86_400_000;
-
             $this->info(sprintf('Optimizing [%s] on %s %s over the last %d day(s)...', $name, $symbol, $interval, $days));
-
-            try {
-                $candles = $exchange->candlesBetween($symbol, $interval, $startTime, $endTime);
-            } catch (ExchangeException $e) {
-                $this->error("Failed to fetch candles: {$e->getMessage()}");
-
-                return self::FAILURE;
-            }
         }
 
-        if ($candles === []) {
-            $this->warn('Got 0 candles — check your network connection, symbol, interval or CSV file.');
+        $candles = $this->loadCandles($symbol, $interval, $days, $csvPath);
 
+        if ($candles === null) {
             return self::FAILURE;
         }
 
@@ -115,7 +87,10 @@ final class BotOptimize extends Command
             return self::FAILURE;
         }
 
-        $combos = $this->cartesianProduct($grid);
+        $combos = array_map(
+            fn (array $c): array => array_combine(array_keys($grid), $c),
+            Arr::crossJoin(...array_values($grid)),
+        );
         $skipped = 0;
 
         // Reject nonsensical EMA crossover configurations.
@@ -210,7 +185,7 @@ final class BotOptimize extends Command
             $this->line(sprintf(
                 "    '%s' => %s,",
                 $key,
-                is_int($value) ? (string) $value : sprintf('%.1f', $value),
+                is_int($value) ? (string) $value : Num::trim($value, 6),
             ));
         }
 
@@ -245,12 +220,14 @@ final class BotOptimize extends Command
 
             [$key, $rawValues] = $parts;
 
-            if (! array_key_exists($key, $baseParams)) {
+            // 'class' names the strategy implementation (handled by
+            // StrategyFactory); it is never a sweepable parameter.
+            if ($key === 'class' || ! array_key_exists($key, $baseParams)) {
                 throw new RuntimeException(sprintf(
                     'Unknown parameter [%s] for strategy [%s]; known parameters: %s.',
                     $key,
                     $name,
-                    implode(', ', array_keys($baseParams)),
+                    implode(', ', array_diff(array_keys($baseParams), ['class'])),
                 ));
             }
 
@@ -264,6 +241,15 @@ final class BotOptimize extends Command
                     throw new RuntimeException("Invalid --param [{$override}]; value [{$value}] is not numeric.");
                 }
 
+                if ($castToInt && filter_var($value, FILTER_VALIDATE_INT) === false) {
+                    throw new RuntimeException(sprintf(
+                        'Invalid --param [%s]; parameter [%s] is an integer but value [%s] is not.',
+                        $override,
+                        $key,
+                        $value,
+                    ));
+                }
+
                 $values[] = $castToInt ? (int) $value : (float) $value;
             }
 
@@ -271,28 +257,5 @@ final class BotOptimize extends Command
         }
 
         return $grid;
-    }
-
-    /**
-     * @param  array<string, array<int, int|float>>  $grid
-     * @return array<int, array<string, int|float>> every combination of one value per key
-     */
-    private function cartesianProduct(array $grid): array
-    {
-        $combos = [[]];
-
-        foreach ($grid as $key => $values) {
-            $next = [];
-
-            foreach ($combos as $combo) {
-                foreach ($values as $value) {
-                    $next[] = $combo + [$key => $value];
-                }
-            }
-
-            $combos = $next;
-        }
-
-        return $combos;
     }
 }
