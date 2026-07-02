@@ -49,6 +49,10 @@ php artisan bot:run --once
 
 # Offene Positionen, PnL und Equity anzeigen
 php artisan bot:status
+
+# Cross-Sectional Momentum: Top-K-Rotation über das Coin-Universum backtesten
+php artisan bot:xsmom --days=730
+php artisan bot:xsmom --from="2025-07-01"   # Out-of-Sample-Fenster
 ```
 
 Das **Dashboard** (Equity-Kurve, offene Positionen, letzte Trades) läuft unter

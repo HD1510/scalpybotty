@@ -164,6 +164,32 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cross-sectional momentum (portfolio rotation)
+    |--------------------------------------------------------------------------
+    |
+    | Rank a universe of coins by trailing return, hold the top_k equally
+    | weighted, rebalance every rebalance_days. Momentum is measured from
+    | lookback_days ago to skip_days ago (skipping the most recent days
+    | avoids short-term reversal). With min_momentum, coins must trend at
+    | least this much to be held at all — otherwise that slot stays in cash
+    | (absolute momentum filter).
+    |
+    */
+
+    'xs_momentum' => [
+        'universe' => array_filter(array_map('trim', explode(',', env(
+            'TRADING_XSMOM_UNIVERSE',
+            'BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,LINKUSDT,LTCUSDT,DOTUSDT,AVAXUSDT,UNIUSDT',
+        )))),
+        'lookback_days' => (int) env('TRADING_XSMOM_LOOKBACK', 30),
+        'skip_days' => (int) env('TRADING_XSMOM_SKIP', 7),
+        'top_k' => (int) env('TRADING_XSMOM_TOP', 3),
+        'rebalance_days' => (int) env('TRADING_XSMOM_REBALANCE', 7),
+        'min_momentum' => (float) env('TRADING_XSMOM_MIN_MOMENTUM', 0.0),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Exchange credentials & endpoints
     |--------------------------------------------------------------------------
     */
