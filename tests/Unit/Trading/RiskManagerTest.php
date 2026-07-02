@@ -107,6 +107,53 @@ class RiskManagerTest extends TestCase
         $this->assertNull($this->riskManager->entryBlockReason(TradingMode::Paper, 10000.0));
     }
 
+    public function test_recent_stop_loss_triggers_entry_cooldown(): void
+    {
+        $manager = $this->managerWithCooldown(30);
+        $this->createStopLossTrade(now('UTC')->subMinutes(10));
+
+        $this->assertStringContainsString(
+            'cooldown after stop-loss',
+            (string) $manager->entryBlockReason(TradingMode::Paper, 10000.0, 'BTCUSDT'),
+        );
+    }
+
+    public function test_expired_cooldown_allows_entries_again(): void
+    {
+        $manager = $this->managerWithCooldown(30);
+        $this->createStopLossTrade(now('UTC')->subMinutes(40));
+
+        $this->assertNull($manager->entryBlockReason(TradingMode::Paper, 10000.0, 'BTCUSDT'));
+    }
+
+    public function test_cooldown_is_per_symbol_and_ignores_other_exit_reasons(): void
+    {
+        $manager = $this->managerWithCooldown(30);
+        $this->createStopLossTrade(now('UTC')->subMinutes(10));
+        $this->createClosedTrade(TradingMode::Paper, 50.0, now('UTC')->subMinutes(5)); // no close_reason
+
+        $this->assertNull($manager->entryBlockReason(TradingMode::Paper, 10000.0, 'ETHUSDT'));
+    }
+
+    private function managerWithCooldown(int $minutes): RiskManager
+    {
+        return new RiskManager([
+            'risk_per_trade' => 0.01,
+            'max_open_trades' => 2,
+            'max_daily_loss_pct' => 1.0,
+            'min_confidence' => 0.5,
+            'entry_cooldown_minutes' => $minutes,
+        ]);
+    }
+
+    private function createStopLossTrade(\Illuminate\Support\Carbon $closedAt): Trade
+    {
+        $trade = $this->createClosedTrade(TradingMode::Paper, -100.0, $closedAt);
+        $trade->update(['close_reason' => 'stop_loss']);
+
+        return $trade;
+    }
+
     private function createOpenTrade(TradingMode $mode): Trade
     {
         return Trade::create([

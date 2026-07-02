@@ -50,6 +50,7 @@ final class Backtester
         $feeRate = (float) ($this->paperConfig['fee_rate'] ?? 0.0);
         $slippage = (float) ($this->paperConfig['slippage_bps'] ?? 0.0) / 1e4;
         $maxDailyLossPct = (float) ($this->riskConfig['max_daily_loss_pct'] ?? 0.0);
+        $cooldownMs = (int) ($this->riskConfig['entry_cooldown_minutes'] ?? 0) * 60_000;
 
         $balance = $startingBalance;
         $totalFees = 0.0;
@@ -62,12 +63,18 @@ final class Backtester
         /** @var array{entry_time: int, entry: float, qty: float, stop: float, tp: float, fees: float}|null $position */
         $position = null;
 
+        // No re-entry before this timestamp (stop-loss cooldown, in parity
+        // with RiskManager::entryBlockReason()).
+        $cooldownUntil = 0;
+
         $close = function (float $rawExit, int $exitTime, string $reason, int $exitCandleCloseTime) use (
             &$balance,
             &$totalFees,
             &$trades,
             &$position,
             &$dailyPnl,
+            &$cooldownUntil,
+            $cooldownMs,
             $slippage,
             $feeRate
         ): void {
@@ -83,6 +90,10 @@ final class Backtester
             // close, feeding the daily-loss circuit breaker below.
             $day = intdiv($exitCandleCloseTime, self::MS_PER_DAY);
             $dailyPnl[$day] = ($dailyPnl[$day] ?? 0.0) + $pnl;
+
+            if ($reason === 'stop_loss' && $cooldownMs > 0) {
+                $cooldownUntil = $exitTime + $cooldownMs;
+            }
 
             $trades[] = [
                 'entry_time' => $position['entry_time'],
@@ -147,7 +158,7 @@ final class Backtester
                         && $balance > 0
                         && $dayPnl <= -($maxDailyLossPct * $balance);
 
-                    if (! $breakerTripped) {
+                    if (! $breakerTripped && $next->openTime >= $cooldownUntil) {
                         $entry = $next->open * (1 + $slippage);
 
                         // While flat, equity equals the quote balance.

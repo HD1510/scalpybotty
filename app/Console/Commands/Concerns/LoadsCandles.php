@@ -7,7 +7,9 @@ use App\Trading\Contracts\Exchange;
 use App\Trading\Contracts\HistoricalDataProvider;
 use App\Trading\Data\Candle;
 use App\Trading\Exceptions\ExchangeException;
+use Carbon\CarbonImmutable;
 use RuntimeException;
+use Throwable;
 
 /**
  * Candle acquisition shared by the backtest, optimize and export commands:
@@ -44,6 +46,40 @@ trait LoadsCandles
         }
 
         return $candles;
+    }
+
+    /**
+     * Restrict candles to the --from/--to window (dates or datetimes, UTC).
+     * Enables in-sample/out-of-sample discipline: tune on one date range,
+     * validate on another the optimizer has never seen.
+     *
+     * @param  Candle[]  $candles
+     * @return Candle[]|null null after printing an error for an unparsable date
+     */
+    private function filterCandleRange(array $candles, ?string $from, ?string $to): ?array
+    {
+        try {
+            $fromMs = $from ? CarbonImmutable::parse($from, 'UTC')->getTimestampMs() : null;
+            $toMs = $to ? CarbonImmutable::parse($to, 'UTC')->getTimestampMs() : null;
+        } catch (Throwable) {
+            $this->error(sprintf('Could not parse --from/--to date [%s / %s]; use e.g. 2026-06-01 or "2026-06-01 12:00".', $from ?? '', $to ?? ''));
+
+            return null;
+        }
+
+        if ($fromMs === null && $toMs === null) {
+            return $candles;
+        }
+
+        $filtered = array_values(array_filter(
+            $candles,
+            fn (Candle $c): bool => ($fromMs === null || $c->openTime >= $fromMs)
+                && ($toMs === null || $c->closeTime <= $toMs),
+        ));
+
+        $this->line(sprintf('Date filter: %d of %d candles in range.', count($filtered), count($candles)));
+
+        return $filtered;
     }
 
     /**

@@ -28,8 +28,11 @@ final class RiskManager
      * 2. Daily-loss circuit breaker: once today's (UTC) realized losses reach
      *    max_daily_loss_pct of equity, entries stay blocked until the next
      *    UTC day.
+     * 3. Stop-loss cooldown: after a stop-out (per symbol when given), no
+     *    re-entry for entry_cooldown_minutes — a stopped dip that keeps
+     *    falling would otherwise be re-bought immediately.
      */
-    public function entryBlockReason(TradingMode $mode, float $equity): ?string
+    public function entryBlockReason(TradingMode $mode, float $equity, ?string $symbol = null): ?string
     {
         $openTrades = Trade::query()
             ->where('status', TradeStatus::Open)
@@ -50,6 +53,27 @@ final class RiskManager
 
         if ($equity > 0 && $todayPnl <= -$lossLimit) {
             return sprintf('daily loss limit hit (today %.2f <= -%.2f)', $todayPnl, $lossLimit);
+        }
+
+        $cooldownMinutes = (int) ($this->config['entry_cooldown_minutes'] ?? 0);
+
+        if ($cooldownMinutes > 0) {
+            $recentStop = Trade::query()
+                ->where('status', TradeStatus::Closed)
+                ->where('mode', $mode)
+                ->where('close_reason', 'stop_loss')
+                ->when($symbol !== null, fn ($query) => $query->where('symbol', $symbol))
+                ->where('closed_at', '>=', now('UTC')->subMinutes($cooldownMinutes))
+                ->orderByDesc('closed_at')
+                ->first();
+
+            if ($recentStop !== null) {
+                return sprintf(
+                    'cooldown after stop-loss on %s until %s UTC',
+                    $recentStop->symbol,
+                    $recentStop->closed_at?->addMinutes($cooldownMinutes)->format('H:i'),
+                );
+            }
         }
 
         return null;

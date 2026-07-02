@@ -21,6 +21,8 @@ final class BotOptimize extends Command
         {--days=14 : How many days of history to fetch when no CSV is given}
         {--interval= : Candle interval (defaults to trading.interval)}
         {--param=* : Grid override, e.g. --param=fast_ema=5,9,12 --param=slow_ema=21,34}
+        {--from= : Only replay candles from this UTC date/time on (in-sample/out-of-sample splits)}
+        {--to= : Only replay candles up to this UTC date/time}
         {--top=10 : How many results to show}';
 
     protected $description = 'Grid-search strategy parameters over historical candles and rank the results';
@@ -76,6 +78,14 @@ final class BotOptimize extends Command
         $candles = $this->loadCandles($symbol, $interval, $days, $csvPath);
 
         if ($candles === null) {
+            return self::FAILURE;
+        }
+
+        $candles = $this->filterCandleRange($candles, $this->option('from'), $this->option('to'));
+
+        if ($candles === null || $candles === []) {
+            $candles === [] && $this->warn('No candles left in the --from/--to range.');
+
             return self::FAILURE;
         }
 

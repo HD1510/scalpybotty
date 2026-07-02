@@ -184,7 +184,7 @@ final class TradingBot
         }
 
         $equity = $this->computeEquity($mode);
-        $blockReason = $this->risk->entryBlockReason($mode, $equity);
+        $blockReason = $this->risk->entryBlockReason($mode, $equity, $symbol);
 
         if ($blockReason !== null) {
             return "{$symbol}: entry blocked — {$blockReason}";

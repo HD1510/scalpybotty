@@ -63,6 +63,9 @@ return [
         'max_open_trades' => (int) env('TRADING_MAX_OPEN_TRADES', 3),
         'max_daily_loss_pct' => (float) env('TRADING_MAX_DAILY_LOSS_PCT', 0.03),
         'min_confidence' => (float) env('TRADING_MIN_CONFIDENCE', 0.5),
+        // After a stop-loss, block re-entry on that symbol for this many
+        // minutes (0 disables) — no immediate re-buys into a falling market.
+        'entry_cooldown_minutes' => (int) env('TRADING_ENTRY_COOLDOWN_MINUTES', 30),
     ],
 
     /*
@@ -105,6 +108,11 @@ return [
 
         'bollinger_reversion' => [
             'class' => App\Trading\Strategies\MeanReversionBollingerStrategy::class,
+            // Wait for the close to turn back above the lower band before
+            // entering (avoids buying into a falling knife).
+            'entry_confirmation' => true,
+            // Only fade dips above this EMA (0 disables the regime filter).
+            'trend_ema' => 200,
             'bb_period' => 20,
             'bb_std_dev' => 2.0,
             'rsi_period' => 14,

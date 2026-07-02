@@ -17,7 +17,9 @@ final class BotBacktest extends Command
         {--symbol= : Symbol to backtest (defaults to the first of trading.symbols)}
         {--days=7 : How many days of history to replay}
         {--interval= : Candle interval (defaults to trading.interval)}
-        {--csv= : Replay candles from a CSV file (see bot:export-data) instead of fetching from the exchange}';
+        {--csv= : Replay candles from a CSV file (see bot:export-data) instead of fetching from the exchange}
+        {--from= : Only replay candles from this UTC date/time on (e.g. 2026-06-01)}
+        {--to= : Only replay candles up to this UTC date/time}';
 
     protected $description = 'Replay the configured strategy over historical candles and report performance';
 
@@ -44,6 +46,14 @@ final class BotBacktest extends Command
         $candles = $this->loadCandles($symbol, $interval, $days, $csvPath);
 
         if ($candles === null) {
+            return self::FAILURE;
+        }
+
+        $candles = $this->filterCandleRange($candles, $this->option('from'), $this->option('to'));
+
+        if ($candles === null || $candles === []) {
+            $candles === [] && $this->warn('No candles left in the --from/--to range.');
+
             return self::FAILURE;
         }
 
