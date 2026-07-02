@@ -83,26 +83,32 @@ trait LoadsCandles
     }
 
     /**
+     * @param  HistoricalDataProvider|null  $provider  Overrides the container-bound exchange
+     *                                                 (e.g. a mainnet client for data export).
      * @return Candle[]|null oldest first (may be empty); null after printing an error
      */
-    private function fetchCandlesFromExchange(string $symbol, string $interval, int $days): ?array
+    private function fetchCandlesFromExchange(string $symbol, string $interval, int $days, ?HistoricalDataProvider $provider = null): ?array
     {
-        $exchange = resolve(Exchange::class);
+        if ($provider === null) {
+            $exchange = resolve(Exchange::class);
 
-        if (! $exchange instanceof HistoricalDataProvider) {
-            $this->error(sprintf(
-                'Exchange [%s] cannot provide historical data; this command needs a HistoricalDataProvider implementation.',
-                $exchange->name(),
-            ));
+            if (! $exchange instanceof HistoricalDataProvider) {
+                $this->error(sprintf(
+                    'Exchange [%s] cannot provide historical data; this command needs a HistoricalDataProvider implementation.',
+                    $exchange->name(),
+                ));
 
-            return null;
+                return null;
+            }
+
+            $provider = $exchange;
         }
 
         $endTime = now('UTC')->getTimestampMs();
         $startTime = $endTime - $days * 86_400_000;
 
         try {
-            return $exchange->candlesBetween($symbol, $interval, $startTime, $endTime);
+            return $provider->candlesBetween($symbol, $interval, $startTime, $endTime);
         } catch (ExchangeException $e) {
             $this->error("Failed to fetch candles: {$e->getMessage()}");
 

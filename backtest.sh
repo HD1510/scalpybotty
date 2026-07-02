@@ -22,7 +22,6 @@ INTERVALS="${3:-5m 15m 1h}"
 SPLIT_DAYS="${SPLIT_DAYS:-30}"
 STRATEGIES="${STRATEGIES:-ema_rsi_scalp bollinger_reversion}"
 
-SPLIT_DATE=$(date -u -d "-${SPLIT_DAYS} days" +%F 2>/dev/null || date -u -v-"${SPLIT_DAYS}"d +%F)
 REPORT_DIR="storage/app/backtests"
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 mkdir -p "$REPORT_DIR"
@@ -55,11 +54,28 @@ for iv in $INTERVALS; do
     csv="storage/app/candles/$SYMBOL-$iv.csv"
 
     if [[ ! -f "$csv" || "${FORCE_EXPORT:-0}" == "1" ]]; then
-        echo "==> Exportiere $SYMBOL $iv ($DAYS Tage)..."
+        echo "==> Exportiere $SYMBOL $iv ($DAYS Tage, Binance mainnet)..."
         php artisan bot:export-data --symbol="$SYMBOL" --interval="$iv" --days="$DAYS" --out="$csv"
     else
         echo "==> $csv vorhanden — Export übersprungen (FORCE_EXPORT=1 erzwingt)"
     fi
+
+    # Split aus der tatsächlichen Datenabdeckung ableiten: die letzten
+    # SPLIT_DAYS sind out-of-sample; deckt die CSV weniger ab, wird bei
+    # 2/3 der vorhandenen Daten gesplittet (mit Warnung).
+    first_ms=$(sed -n '2p' "$csv" | cut -d, -f1)
+    last_ms=$(tail -n 1 "$csv" | cut -d, -f1)
+    coverage_days=$(( (last_ms - first_ms) / 86400000 ))
+    split_ms=$(( last_ms - SPLIT_DAYS * 86400000 ))
+
+    if (( split_ms <= first_ms )); then
+        split_ms=$(( first_ms + (last_ms - first_ms) * 2 / 3 ))
+        echo "    WARNUNG: CSV deckt nur ~${coverage_days} Tage — Split auf 2/3 der Daten gesetzt."
+    fi
+
+    SPLIT_DATE=$(date -u -d "@$(( split_ms / 1000 ))" '+%Y-%m-%d %H:%M' 2>/dev/null \
+        || date -u -r "$(( split_ms / 1000 ))" '+%Y-%m-%d %H:%M')
+    echo "    Abdeckung: ~${coverage_days} Tage | Split (out-of-sample ab): $SPLIT_DATE UTC"
 
     for strat in $STRATEGIES; do
         echo "==> $strat auf $iv (full / in-sample / out-of-sample)..."
@@ -71,12 +87,12 @@ done
 
 echo
 echo "================================================================================"
-echo "  Backtest-Zusammenfassung  $SYMBOL  ($DAYS Tage, Split: $SPLIT_DATE)"
-echo "  'out' = die letzten $SPLIT_DAYS Tage — das einzige Fenster, das zählt."
+echo "  Backtest-Zusammenfassung  $SYMBOL  (Split-Daten je Intervall siehe oben)"
+echo "  'out' = die letzten ~$SPLIT_DAYS Tage — das einzige Fenster, das zählt."
 echo "================================================================================"
 echo "$SUMMARY"
 echo
 echo "Volle Reports: $REPORT_DIR/$STAMP-*.txt"
 echo "Nächster Schritt bei einem vielversprechenden 'in'-Fenster:"
-echo "  TRADING_STRATEGY=<strat> php artisan bot:optimize --csv=storage/app/candles/$SYMBOL-<tf>.csv --to=$SPLIT_DATE"
-echo "  ... und die beste Kombination dann mit --from=$SPLIT_DATE gegenvalidieren."
+echo "  TRADING_STRATEGY=<strat> php artisan bot:optimize --csv=storage/app/candles/$SYMBOL-<tf>.csv --to=\"<split>\""
+echo "  ... und die beste Kombination dann mit --from=\"<split>\" gegenvalidieren."

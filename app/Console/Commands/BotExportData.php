@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Console\Commands\Concerns\LoadsCandles;
 use App\Trading\Backtest\CsvCandleStore;
+use App\Trading\Exchanges\BinanceExchange;
 use Illuminate\Console\Command;
 use Illuminate\Support\Arr;
 
@@ -15,7 +16,8 @@ final class BotExportData extends Command
         {--symbol= : Symbol to export (defaults to the first of trading.symbols)}
         {--days=30 : How many days of history to fetch}
         {--interval= : Candle interval (defaults to trading.interval)}
-        {--out= : Output CSV path (defaults to storage/app/candles/<symbol>-<interval>.csv)}';
+        {--out= : Output CSV path (defaults to storage/app/candles/<symbol>-<interval>.csv)}
+        {--testnet : Export candles from the Binance testnet instead of mainnet}';
 
     protected $description = 'Download historical candles to a CSV file for offline backtesting (bot:backtest --csv=...)';
 
@@ -32,9 +34,22 @@ final class BotExportData extends Command
             return self::FAILURE;
         }
 
-        $this->info(sprintf('Fetching %s %s candles for the last %d day(s)...', $symbol, $interval, $days));
+        // Backtests need real market data: export always talks to Binance
+        // directly and defaults to MAINNET (klines are public, no API key
+        // required) regardless of BINANCE_TESTNET — the testnet keeps only a
+        // few weeks of history and trades without real liquidity.
+        $useTestnet = (bool) $this->option('testnet');
+        $provider = new BinanceExchange(array_merge((array) config('trading.binance'), ['testnet' => $useTestnet]));
 
-        $candles = $this->fetchCandlesFromExchange($symbol, $interval, $days);
+        $this->info(sprintf(
+            'Fetching %s %s candles for the last %d day(s) from Binance %s...',
+            $symbol,
+            $interval,
+            $days,
+            $useTestnet ? 'TESTNET (limited history!)' : 'mainnet',
+        ));
+
+        $candles = $this->fetchCandlesFromExchange($symbol, $interval, $days, $provider);
 
         if ($candles === null) {
             return self::FAILURE;
