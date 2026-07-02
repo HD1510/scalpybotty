@@ -197,27 +197,37 @@ final class Indicators
 
         $closes = array_values($closes);
         $count = count($closes);
-        $middle = self::sma($closes, $period);
+        $middle = [];
         $upper = [];
         $lower = [];
+        $sum = 0.0;
+        $sumSq = 0.0;
 
         for ($i = 0; $i < $count; $i++) {
-            if ($middle[$i] === null) {
+            $sum += $closes[$i];
+            $sumSq += $closes[$i] * $closes[$i];
+
+            if ($i >= $period) {
+                $old = $closes[$i - $period];
+                $sum -= $old;
+                $sumSq -= $old * $old;
+            }
+
+            if ($i < $period - 1) {
+                $middle[$i] = null;
                 $upper[$i] = null;
                 $lower[$i] = null;
 
                 continue;
             }
 
-            $variance = 0.0;
-
-            for ($j = $i - $period + 1; $j <= $i; $j++) {
-                $variance += ($closes[$j] - $middle[$i]) ** 2;
-            }
-
-            $deviation = sqrt($variance / $period) * $stdDev;
-            $upper[$i] = $middle[$i] + $deviation;
-            $lower[$i] = $middle[$i] - $deviation;
+            $mean = $sum / $period;
+            // Population variance; clamp tiny negatives from float rounding.
+            $variance = max($sumSq / $period - $mean * $mean, 0.0);
+            $deviation = sqrt($variance) * $stdDev;
+            $middle[$i] = $mean;
+            $upper[$i] = $mean + $deviation;
+            $lower[$i] = $mean - $deviation;
         }
 
         return ['upper' => $upper, 'middle' => $middle, 'lower' => $lower];
